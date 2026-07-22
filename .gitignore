@@ -1,0 +1,30 @@
+# Build artifacts
+tinyllm
+src/*.o
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Model files
+*.gguf
+
+# Data / output
+output/
+data/
+*.jsonl
+
+# Environment
+.env
