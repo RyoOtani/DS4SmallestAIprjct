@@ -1,0 +1,104 @@
+# Hugging Face Hub configuration for TinyLLM models
+#
+# This file is used by the Hugging Face Hub library to automatically
+# push and manage model files. GGUF files are tracked with Git LFS.
+#
+# Setup:
+#   1. Install: pip install huggingface-hub
+#   2. Login:   huggingface-cli login
+#   3. Create:  huggingface-cli repo create tinyllm-nano --type model
+#   4. Push:    see push_to_hub.sh below
+#
+
+# ── Model repository settings ────────────────────────────────────────────────
+
+# Repository name on Hugging Face Hub
+repo_name: tinyllm-nano
+
+# Repository type: model, dataset, or space
+repo_type: model
+
+# Organization or user namespace
+namespace: RyoOtani
+
+# Default branch
+branch: main
+
+# ── Model metadata ──────────────────────────────────────────────────────────
+
+# Used by Hugging Face for model discovery in the Hub
+model_id: RyoOtani/tinyllm-nano
+pipeline_tag: text-generation
+library_name: tinyllm
+
+# ── File tracking ────────────────────────────────────────────────────────────
+
+# Files to include when pushing to Hub
+include_files:
+  - "*.gguf"           # Quantized model weights (Git LFS)
+  - "*.safetensors"    # SafeTensors format (Git LFS)
+  - "*.bin"            # Raw PyTorch weights (Git LFS)
+  - "config.json"      # Model config
+  - "tokenizer.json"   # BPE tokenizer
+  - "tokenizer_config.json"
+  - "README.md"        # Model card
+  - "*.md"             # Any documentation
+
+# ── Multi-model configuration ────────────────────────────────────────────────
+# If you want to upload multiple model scales, duplicate this file
+# and change the repo_name accordingly.
+
+models:
+  - id: RyoOtani/tinyllm-nano
+    scale: nano
+    params: 1.5B
+    active_params: 0.5B
+    gguf_size_q4: "~900 MB"
+
+  - id: RyoOtani/tinyllm-small
+    scale: small
+    params: 3.0B
+    active_params: 1.0B
+    gguf_size_q4: "~1.8 GB"
+
+  - id: RyoOtani/tinyllm-medium
+    scale: medium
+    params: 14.5B
+    active_params: 5.5B
+    gguf_size_q4: "~8.5 GB"
+
+  - id: RyoOtani/tinyllm-large
+    scale: large
+    params: 28.1B
+    active_params: 10.8B
+    gguf_size_q4: "~16 GB"
+
+  - id: RyoOtani/tinyllm-dense-7b
+    scale: dense-7b
+    params: 7.2B
+    active_params: 7.2B
+    gguf_size_q4: "~4.2 GB"
+
+  - id: RyoOtani/tinyllm-xlarge
+    scale: xlarge
+    params: 43.9B
+    active_params: 16.5B
+    gguf_size_q4: "~25 GB"
+
+  - id: RyoOtani/tinyllm-xxlarge
+    scale: xxlarge
+    params: 72.0B
+    active_params: 27.0B
+    gguf_size_q4: "~41 GB"
+
+  - id: RyoOtani/tinyllm-mega
+    scale: mega
+    params: 178.6B
+    active_params: 67.8B
+    gguf_size_q4: "~102 GB"
+
+  - id: RyoOtani/tinyllm-giga
+    scale: giga
+    params: 6,716.2B
+    active_params: 314.6B
+    gguf_size_q4: "~3.8 TB"
