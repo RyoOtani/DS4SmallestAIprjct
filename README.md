@@ -1,4 +1,4 @@
-# tinyllm — ds4 Personal AI
+# TinyLLM — A lightweight C-based LLM inference and AI runtime — ds4 Personal AI
 
 > 「インターネット不要、月額課金なし。個人の PC で GPT‑5 に匹敵する開発生産性を発揮し、かつ自ら成長し続ける AI パートナー」
 
