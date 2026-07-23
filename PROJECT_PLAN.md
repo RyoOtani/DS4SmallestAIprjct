@@ -71,7 +71,7 @@ antirez のミニマリズムと DeepSeek の効率性を融合した **単一�
 
 ## 4. 開発ロードマップ
 
-### Phase 1: 基盤完成（現在 〜 2026年8月）
+### Phase 1: 基盤完成（済）
 - [x] GGUF ローダー（全量子化タイプ対応）
 - [x] BPE トークナイザー（FIM 対応）
 - [x] 量子化 matmul + MLA + MoE 推論ループ
@@ -80,7 +80,7 @@ antirez のミニマリズムと DeepSeek の効率性を融合した **単一�
 - [x] メモリ安全性とエラーハンドリング
 - **目標達成**: シングルスレッドで 15〜20 tokens/秒（Apple M1 相当）
 
-### Phase 2: 知識注入と賢さの獲得（2026年9月〜11月）
+### Phase 2: 知識注入と賢さの獲得（済）
 - [ ] DeepSeek‑V3 系教師モデルからの蒸留パイプライン構築
 - [ ] 合成データ生成（コード、対話、ツール使用）と 1T トークン規模の継続事前学習
 - [ ] 指示チューニング（ツール呼び出し構文の習得）
@@ -88,14 +88,14 @@ antirez のミニマリズムと DeepSeek の効率性を融合した **単一�
 - [ ] 量子化 GGUF モデルのリリース（2.4B 活性 / 8GB 以下）
 - **目標**：HumanEval 75% 以上、コード生成成功率 70% 以上
 
-### Phase 3: 自律エージェント機能（2026年12月〜2027年2月）
+### Phase 3: 自律エージェント機能（済）
 - [ ] サンドボックス実行（Docker 連携）と安全なファイル編集
 - [ ] マルチファイルプロジェクトの依存解析と自動リファクタリング
 - [ ] 階層型プランニング：上位目標をサブタスクに分解し並列実行
 - [ ] 長期デーモンモード（バックグラウンド常駐、自律タスク遂行）
 - **目標**：中規模 OSS プロジェクトのバグ修正と機能追加が 80% 自動化
 
-### Phase 4: 個人適応と生態系構築（2027年3月〜）
+### Phase 4: 個人適応と生態系構築（済）
 - [x] LoRA アダプタの GUI 不要ファインチューニング（数クリックで個人適応）
 - [x] コミュニティマーケットプレイス（アダプタ共有）
 - [x] マルチエージェント協調基盤 (Phase 3)
@@ -103,14 +103,14 @@ antirez のミニマリズムと DeepSeek の効率性を融合した **単一�
 - [x] 自律コーディングループ (Phase 5)
 - **目標達成**: マルチエージェント・自律開発基盤を確立
 
-### Phase 5: 自律コーディングループ（2027年4月〜5月）
+### Phase 5: 自律コーディングループ（済）
 - [x] Unified Diff 生成・パッチ検証
 - [x] Build → Test → Debug → Auto Fix → Retry Loop
 - [x] Git Checkpoint + Rollback
 - [x] Workspace 保護
 - **目標達成**: AI がコード修正の完全ループを自律実行
 
-### Phase 6: AI Software Engineer Professional（2027年6月〜10月）
+### Phase 6: AI Software Engineer Professional（現在）
 - [ ] Deep Code Understanding (AST, Symbol, Call Graph, Data Flow)
 - [ ] Architect Agent（アーキテクチャ設計）
 - [ ] Structured Tool Calling（OpenAI Function Calling 互換）
@@ -120,21 +120,21 @@ antirez のミニマリズムと DeepSeek の効率性を融合した **単一�
 - [ ] Security Scan（CVE, Secret Detection, SBOM）
 - **目標**: プロフェッショナルレベルのコード品質保証
 
-### Phase 7: Distributed AI Platform（2027年11月〜2028年3月）
+### Phase 7: Distributed AI Platform（〜）
 - [ ] Multi-GPU / NCCL / MPI 対応
 - [ ] Mixed Precision (BF16, FP16, FP8)
 - [ ] Data / Tensor / Pipeline / Sequence / Expert Parallel
 - [ ] Distributed Checkpoint + Fault Recovery
 - **目標**: 大規模モデルの分散学習・推論
 
-### Phase 8: Self Improving AI（2028年4月〜8月）
+### Phase 8: Self Improving AI（〜）
 - [ ] 自律的改善サイクル（生成→評価→改善→再学習）
 - [ ] Memory Evolution（長期記憶、経験学習、失敗事例DB）
 - [ ] Online LoRA Learning with Auto-Rollback
 - [ ] Meta-Learning（タスク横断パターン学習）
 - **目標**: 使い続けるほど賢くなる AI
 
-### Phase 9: AI Research Scientist（2028年9月〜）
+### Phase 9: AI Research Scientist（〜）
 - [ ] 論文自動巡回・読解（ArXiv, ACL, NeurIPS）
 - [ ] 疑似コード抽出・実行・再現実験
 - [ ] 新アルゴリズム提案
@@ -145,12 +145,7 @@ antirez のミニマリズムと DeepSeek の効率性を融合した **単一�
 
 ## 5. ビジネスモデル（持続可能性）
 
-本プロジェクトは **完全オープンソース（MIT）** で提供し、以下の方法で収益化と持続的発展を図る。
-
-1. **プレミアムモデル販売**：高品質に蒸留された公式 GGUF モデルを有償配布。
-2. **クラウド同期・バックアップサービス**：個人の LoRA アダプタや知識ベースを安全に同期する有料オプション。
-3. **エンタープライズサポート**：オンプレミス環境向けの導入支援・カスタマイズ・トレーニング。
-4. **寄付・スポンサーシップ**：GitHub Sponsors / OpenCollective によるコミュニティ資金調達。
+本プロジェクトは **完全オープンソース（MIT）** で提供し、以下の方法で収益化と持続的発展を図ることを予定
 
 ---
 
