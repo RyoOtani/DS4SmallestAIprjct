@@ -23,8 +23,8 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 | Python エージェント | ~7,000 行 |
 | AI モデル定義 | ~3,000 行 |
 | モデルスケール | nano 1.5B 〜 giga 6.7T (9段階) |
-| 完了フェーズ | Phase 1〜8 / 9 |
-| テスト | 69 tests (Phase 6: 6, Phase 7: 6, Phase 8: 50, Model: 7) |
+| 完了フェーズ | Phase 1〜9 / 9 |
+| テスト | 114 tests (Phase 6: 6, Phase 7: 6, Phase 8: 50, Phase 9: 45, Model: 7) |
 
 ## 特徴
 
@@ -75,6 +75,12 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 │      ├─ LoRAオンライン学習  │
 │      ├─ メタ学習(戦略最適化)│
 │      └─ 統合Orchestrator   │
+│  └─ Phase 9: AI研究員     │
+│      ├─ arXiv論文読解+解析 │
+│      ├─ 実験設計+自動実行   │
+│      ├─ 新アルゴリズム提案  │
+│      ├─ 統計的仮説検証     │
+│      └─ 研究レポート生成   │
 └──────────────────────────┘
 ┌──────────────────────────┐
 │  AI モデル (PyTorch)      │
@@ -103,6 +109,11 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 - **障害データベース**: エラーパターンをハッシュ化して検索、過去の修正方法を提案
 - **LoRA オンライン学習**: ベースモデル凍結・劣化時自動ロールバック・安全性ガードレール
 - **メタ学習**: タスク横断パターン認識・戦略最適化・few-shot プロンプト生成
+- **arXiv 論文読解**: 論文検索・構造化解析・知識グラフ構築・文献比較
+- **実験自動設計**: A/Bテスト・グリッドサーチ・アブレーション研究の自動生成
+- **アルゴリズム提案**: 既知技術の組み合わせによる新規アルゴリズム創出・新規性/実現性/インパクト評価
+- **統計的仮説検証**: Welchのt検定・効果量(Cohen's d)・多重比較補正(Bonferroni/Holm)
+- **研究レポート生成**: Markdown + LaTeX 形式の自動論文執筆
 
 ## ビルド
 
@@ -141,6 +152,7 @@ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge
 python3 tests/test_phase6.py
 python3 tests/test_phase7.py
 python3 tests/test_phase8.py
+python3 tests/test_phase9.py
 python3 tests/test_model.py
 
 # 自己改善AI
@@ -150,6 +162,14 @@ python3 -m agent.phase8.cli failures
 python3 -m agent.phase8.cli skills
 python3 -m agent.phase8.cli adapters
 python3 -m agent.phase8.cli status
+
+# AI研究員
+python3 -m agent.phase9.cli search --query "mixture of experts transformer"
+python3 -m agent.phase9.cli read --arxiv-id 1706.03762
+python3 -m agent.phase9.cli propose --problem "efficient LLM inference" --techniques "MoE,MLA,distillation"
+python3 -m agent.phase9.cli hypothesis test --control "0.85,0.86,0.84" --treatment "0.88,0.89,0.87"
+python3 -m agent.phase9.cli research --topic "efficient transformer attention"
+python3 -m agent.phase9.cli status
 ```
 
 ## フェーズ別ロードマップ
@@ -164,7 +184,7 @@ python3 -m agent.phase8.cli status
 | Phase 6 | AI SW Engineer Professional (AST, Arch, Quality, Critic, Debug) | ✅ |
 | Phase 7 | Distributed AI Platform (FSDP/DeepSpeed, TP/PP, FP8, NCCL) | ✅ |
 | Phase 8 | Self Improving AI (自律改善、Online LoRA、経験学習) | ✅ |
-| Phase 9 | AI Research Scientist (論文読解、実験自動化、新アルゴリズム提案) | 📋 |
+| Phase 9 | AI Research Scientist (論文読解、実験自動化、新アルゴリズム提案) | ✅ |
 
 📖 全体構想: [`VISION.md`](VISION.md) · [`PROJECT_PLAN.md`](PROJECT_PLAN.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md)
 
