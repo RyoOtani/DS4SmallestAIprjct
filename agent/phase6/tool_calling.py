@@ -133,6 +133,14 @@ class ToolRegistry:
             return True
         if expected == ParamType.OBJECT:
             return isinstance(value, dict)
+        if expected == ParamType.FILE_CONTENT:
+            if not isinstance(value, str):
+                return False
+            if value.startswith(("http://", "https://", "ftp://")):
+                return False  # reject URLs
+            if len(value) > 1_000_000:
+                return False  # 1 MB size limit
+            return True
         return True
     
     def _register_builtins(self):

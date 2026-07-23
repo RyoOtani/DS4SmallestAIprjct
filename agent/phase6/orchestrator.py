@@ -11,14 +11,19 @@ Integrates:
 
 The orchestrator runs the full professional-grade development cycle:
   Understand → Plan → Implement → Build → Test → Review → Fix → Done
+
+v2.1: Added agent synchronization via file locks and concurrent access protection.
 """
 
 from __future__ import annotations
+import fcntl
 import json
 import os
 import time
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
 
 from .code_understanding import RepositoryAnalyzer
 from .architect import ArchitectAgent
@@ -28,9 +33,55 @@ from .critic import CriticAgent, DebuggerAgent, CodeReview
 from ..phase4.provider import LLMProvider, MockProvider
 
 
+class FileLockManager:
+    """Prevents concurrent modification of files by multiple agents."""
+
+    def __init__(self, lock_dir: Optional[str] = None):
+        self.lock_dir = Path(lock_dir or ".tinyllm_locks")
+        self.lock_dir.mkdir(parents=True, exist_ok=True)
+        self._held_locks: Set[str] = set()
+        self._thread_lock = threading.Lock()
+
+    def _lock_path(self, filepath: str) -> Path:
+        """Generate a lock file path from the target file path."""
+        safe_name = filepath.replace("/", "_").replace("\\", "_")
+        return self.lock_dir / f"{safe_name}.lock"
+
+    @contextmanager
+    def lock_file(self, filepath: str, timeout: float = 30.0):
+        """Context manager to exclusively lock a file for editing."""
+        lock_file = self._lock_path(filepath)
+        start = time.time()
+
+        with self._thread_lock:
+            if filepath in self._held_locks:
+                raise RuntimeError(f"File already locked by this orchestrator: {filepath}")
+
+            # Wait for lock with timeout
+            while lock_file.exists():
+                if time.time() - start > timeout:
+                    raise TimeoutError(f"Timed out waiting for file lock: {filepath}")
+                time.sleep(0.1)
+
+            # Acquire lock
+            lock_file.write_text(str(os.getpid()))
+            self._held_locks.add(filepath)
+
+        try:
+            yield
+        finally:
+            with self._thread_lock:
+                if lock_file.exists():
+                    lock_file.unlink()
+                self._held_locks.discard(filepath)
+
+    def is_locked(self, filepath: str) -> bool:
+        return self._lock_path(filepath).exists()
+
+
 class Phase6Orchestrator:
     """Orchestrates the full Phase 6 AI Software Engineer pipeline."""
-    
+
     def __init__(
         self,
         workspace: str,
@@ -40,14 +91,40 @@ class Phase6Orchestrator:
         self.workspace = Path(workspace).resolve()
         self.provider = provider or MockProvider("OK")
         self.max_attempts = max_attempts
-        
+
         # Core modules
         self.analyzer = RepositoryAnalyzer(str(workspace))
-        self.architect = None  # initialized after scan
+        self.architect = None
         self.tool_registry = ToolRegistry()
         self.quality = QualityPipeline()
         self.critic = CriticAgent()
         self.debugger = DebuggerAgent()
+
+        # Synchronization
+        self.file_locks = FileLockManager()
+        self._agent_states: dict[str, str] = {}
+        self._agent_state_lock = threading.Lock()
+
+    def set_agent_state(self, agent_name: str, state: str):
+        """Record an agent's state for cross-agent coordination."""
+        with self._agent_state_lock:
+            self._agent_states[agent_name] = state
+
+    def get_agent_states(self) -> dict[str, str]:
+        """Get all agent states (for planning/conflict resolution)."""
+        with self._agent_state_lock:
+            return dict(self._agent_states)
+
+    def edit_file_safe(self, filepath: str, new_content: str) -> bool:
+        """Safely edit a file with locking."""
+        target = (self.workspace / filepath).resolve()
+        if target != self.workspace and self.workspace not in target.parents:
+            return False  # workspace escape prevention
+
+        with self.file_locks.lock_file(str(target)):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(new_content, encoding="utf-8")
+        return True
         
         # State
         self.history: list[dict] = []

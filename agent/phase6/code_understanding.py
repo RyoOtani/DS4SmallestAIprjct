@@ -24,10 +24,21 @@ class Symbol:
     line: int
     signature: str = ""
     docstring: str = ""
-    parents: list[str] = field(default_factory=list)   # parent class/scope
-    children: list[str] = field(default_factory=list)    # callees / sub-symbols
+    return_type: str = ""       # inferred or declared return type
+    param_types: dict = field(default_factory=dict)  # param_name → type_string
+    parents: list[str] = field(default_factory=list)
+    children: list[str] = field(default_factory=list)
     decorators: list[str] = field(default_factory=list)
-    visibility: str = "public"  # public, private, protected
+    visibility: str = "public"
+
+
+@dataclass
+class TypeHint:
+    """Inferred type information for a variable or expression."""
+    name: str
+    type_str: str
+    confidence: float = 0.5  # 0.0=guess, 1.0=declared
+    source: str = "inferred"  # declared, inferred, heuristic
 
 
 @dataclass
@@ -60,9 +71,28 @@ class ASTParser:
         self._load()
     
     def _load(self):
+        """Load source file with proper error handling."""
         try:
-            self.source = Path(self.filepath).read_text(encoding="utf-8")
-        except Exception:
+            filepath = Path(self.filepath)
+            if not filepath.exists():
+                self._load_error = f"File not found: {self.filepath}"
+                return
+            if filepath.stat().st_size > 10_000_000:  # 10 MB limit
+                self._load_error = f"File too large: {self.filepath} ({filepath.stat().st_size} bytes)"
+                return
+            # Check for binary
+            with open(filepath, 'rb') as f:
+                head = f.read(512)
+                if b'\x00' in head:
+                    self._load_error = f"Binary file: {self.filepath}"
+                    return
+            self.source = filepath.read_text(encoding="utf-8", errors="replace")
+            self._load_error = None
+        except PermissionError:
+            self._load_error = f"Permission denied: {self.filepath}"
+            self.source = ""
+        except Exception as e:
+            self._load_error = f"Load error: {e}"
             self.source = ""
     
     @staticmethod
