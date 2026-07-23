@@ -150,35 +150,55 @@ python3 tests/test_model.py
 
 ---
 
-## 🤝 協力者募集 — 計算資源が足りません！
+## 🤝 学習済みモデルを共有してください！
 
-TinyLLM は**ソフトウェアアーキテクチャとして完成**しています。
-しかし、**実際にモデルを訓練するための GPU 計算資源が圧倒的に不足**しています。
+TinyLLM の**ソフトウェアは完成**しています。コードはすべて揃っており、`python3 -m agent.phase7.cli train --config xlarge` を実行すれば、理論上どんな規模のモデルでも訓練できます。
 
-### 必要なもの
+**しかし、それを実行する GPU がありません。**
 
-| リソース | 用途 | 目安 |
-|---------|------|------|
-| **GPU クラスタ** | モデル訓練・蒸留 | A100 8〜64 枚級 × 2〜4 週間 |
-| **大規模データセット** | 事前学習・指示チューニング | 1T+ トークンの高品質コード/対話データ |
-| **クラウドクレジット** | AWS/GCP/Azure での実験 | $5,000〜$50,000 相当 |
-| **人的リソース** | C 最適化, モデル蒸留, テスト | コア貢献者 |
+### あなたが GPU を持っているなら
 
-### 協力方法
+もしあなたが A100/H100 クラスタや豊富なクラウドクレジットを持っているなら、
+**モデルを訓練して、GGUF ファイルをコミュニティに共有してください**。
 
-- 💻 **コード**: PR 大歓迎！ [`CONTRIBUTING.md`](CONTRIBUTING.md) (準備中)
-- 🖥️ **GPU 提供**: 遊休 GPU があれば訓練に活用させてください
-- 💰 **スポンサー**: [GitHub Sponsors](https://github.com/sponsors/RyoOtani) で支援
-- 📊 **データ提供**: 高品質コード/対話データの寄贈
-- 🧪 **テスト**: 様々な環境での動作検証
+```bash
+# 1. モデル訓練 (あなたの GPU で)
+torchrun --nproc_per_node=8 -m agent.phase7.cli train --config medium --data /your/dataset
 
-### 連絡先
+# 2. GGUF エクスポート
+python3 -c "
+from model import create_model, export_model_to_gguf
+model = create_model('medium')  # 訓練済みモデルをロード
+export_model_to_gguf(model, 'tinyllm-medium.gguf', {...})
+"
 
-- GitHub Issues: [Issue を作成](https://github.com/RyoOtani/DS4SmallestAIprjct/issues)
-- メール: (準備中)
-- Twitter/X: (準備中)
+# 3. 共有 (Git LFS / Hugging Face / 直接 PR)
+git lfs track "*.gguf"
+git add tinyllm-medium.gguf
+git commit -m "Add trained tinyllm-medium GGUF"
+git push
+```
 
-> **「単一バイナリの哲学」と「最先端 AI」の融合に、あなたの力を貸してください。**
+### 欲しいモデル
+
+| 優先度 | モデル | 活性化パラメータ | 必要 GPU | 用途 |
+|--------|--------|----------------|---------|------|
+| 🔴 最優先 | `small` | 3.0B | A100×4, 1週間 | 個人 PC で快適動作 |
+| 🟠 高 | `medium` | 14.5B | A100×8, 2週間 | 本格ローカル開発 |
+| 🟡 中 | `xlarge` | 43.9B | H100×16, 3週間 | プロフェッショナル用途 |
+| 🟢 低 | `mega` / `giga` | 178B+ | H100×64, 4週間 | 研究・頂点性能 |
+
+### 共有方法
+
+- 📦 **Git LFS**: このリポジトリに直接 PR (100MB 以下の量子化モデル)
+- 🤗 **Hugging Face**: `RyoOtani/tinyllm-models` にアップロード → Issue でお知らせください
+- ☁️ **任意のストレージ**: Google Drive, Dropbox 等 → Issue でリンクを共有
+
+### 訓練データについて
+
+コード・対話データも同時に募集中です。良いデータがあれば良いモデルが生まれます。
+
+> **「コードは書いた。あとは世界の GPU パワーでモデルを生み出すだけ。」**
 
 ## ライセンス
 
