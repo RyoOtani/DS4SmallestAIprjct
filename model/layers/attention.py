@@ -221,7 +221,7 @@ class MultiHeadLatentAttention(nn.Module):
             window_mask = torch.triu(
                 torch.ones(T, T, dtype=torch.bool, device=hidden.device),
                 diagonal=self.sliding_window,
-            )
+            ).unsqueeze(0).unsqueeze(0)
             attn_scores = attn_scores.masked_fill(window_mask, float('-inf'))
         
         # Causal mask
@@ -229,7 +229,7 @@ class MultiHeadLatentAttention(nn.Module):
             causal_mask = torch.triu(
                 torch.ones(T, T, dtype=torch.bool, device=hidden.device),
                 diagonal=1,
-            )
+            ).unsqueeze(0).unsqueeze(0)
             attn_scores = attn_scores.masked_fill(causal_mask, float('-inf'))
         else:
             attn_scores = attn_scores + attention_mask
@@ -335,7 +335,9 @@ class GroupedQueryAttention(nn.Module):
         if attention_mask is not None:
             scores = scores + attention_mask
         else:
-            causal = torch.triu(torch.ones(T, T, dtype=torch.bool, device=hidden.device), diagonal=1)
+            causal = torch.triu(
+                torch.ones(T, T, dtype=torch.bool, device=hidden.device), diagonal=1
+            ).unsqueeze(0).unsqueeze(0)
             scores = scores.masked_fill(causal, float('-inf'))
         
         weights = F.softmax(scores, dim=-1, dtype=torch.float32).to(hidden.dtype)
