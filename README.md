@@ -159,6 +159,23 @@ tinyllm/
 │   └── tools/
 │       ├── code_analyzer.py # AST 解析・依存グラフ
 │       └── sandbox.py       # サンドボックス実行
+├── agent/
+│   ├── phase6/           # AI SW Engineer Professional
+│   │   ├── code_understanding.py  # 多言語AST/CallGraph
+│   │   ├── architect.py  # アーキテクチャ分析
+│   │   ├── quality.py    # Lint/Format/TypeCheck
+│   │   ├── critic.py     # コードレビュー+Debug
+│   │   ├── tool_calling.py # 構造化ツール呼出
+│   │   └── orchestrator.py # Phase 6 統合パイプライン
+│   └── phase7/           # Distributed AI Platform
+│       ├── parallelism.py # TP/PP/DP/EP 3D並列
+│       ├── distributed_trainer.py # FSDP/DeepSpeed
+│       ├── mixed_precision.py # BF16/FP16/FP8
+│       └── nccl_ops.py   # NCCL通信+分散CKPT
+├── model/                # AI モデルアーキテクチャ
+│   ├── config.py         # 9スケール (1.5B〜6.7T)
+│   ├── architecture.py   # MLA+MoE+MTP Transformer
+│   └── layers/           # カスタムレイヤー
 ├── Makefile
 ├── CMakeLists.txt
 ├── requirements.txt
@@ -174,8 +191,8 @@ tinyllm/
 | Phase 3 | [`PHASE3_MULTI_AGENT.md`](PHASE3_MULTI_AGENT.md) | マルチエージェント協調 | ✅ |
 | Phase 4 | [`PHASE4_AI_SOFTWARE_ENGINEER.md`](PHASE4_AI_SOFTWARE_ENGINEER.md) | AI ソフトウェアエンジニア | ✅ |
 | Phase 5 | [`PHASE5_AUTONOMOUS_CODING.md`](PHASE5_AUTONOMOUS_CODING.md) | 完全自律コーディング | ✅ |
-| Phase 6 | — | AI Software Engineer Professional | 🔄 |
-| Phase 7 | — | Distributed AI Platform | 📋 |
+| Phase 6 | — | AI Software Engineer Professional | ✅ |
+| Phase 7 | — | Distributed AI Platform | ✅ |
 | Phase 8 | — | Self Improving AI | 📋 |
 | Phase 9 | — | AI Research Scientist | 📋 |
 
