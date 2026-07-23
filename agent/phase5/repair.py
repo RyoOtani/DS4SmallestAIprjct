@@ -22,6 +22,7 @@ class RepairLoop:
         self.max_attempts = max_attempts
         self._seen_diagnoses: set[str] = set()
         self._seen_patches: set[str] = set()
+        self._last_diagnosis_text: str = ""  # exact string comparison
         self._strategy_cache: dict[str, str] = {}  # error_hash → fix_strategy
 
     def _hash_text(self, text: str) -> str:
@@ -29,19 +30,22 @@ class RepairLoop:
         return hashlib.md5(text.encode())[:16].hex()
 
     def diagnose(self, request: str, verification: dict) -> str:
-        """Run diagnosis and detect staleness."""
+        """Run diagnosis and detect staleness (exact + hash)."""
         context = json.dumps(verification, ensure_ascii=False)
         diagnosis = self.engineer.ask("debugger", request, context)
 
-        # Check if we've seen this exact diagnosis before → stale loop
+        # Fast check: exact same diagnosis text as last time → stuck
+        if diagnosis == self._last_diagnosis_text:
+            return f"[STUCK — identical diagnosis] {diagnosis}"
+        self._last_diagnosis_text = diagnosis
+
+        # Hash check: same content seen before (may differ in whitespace)
         diag_hash = self._hash_text(diagnosis)
         if diag_hash in self._seen_diagnoses:
-            # Try cached strategy instead
             error_type = verification.get("error_type", "unknown")
             if error_type in self._strategy_cache:
                 return f"[CACHED STRATEGY] {self._strategy_cache[error_type]}"
-            # Add staleness marker
-            diagnosis = f"[STALE — same diagnosis #{len(self._seen_diagnoses)}] {diagnosis}"
+            return f"[STALE — same diagnosis #{len(self._seen_diagnoses)}] {diagnosis}"
 
         self._seen_diagnoses.add(diag_hash)
         return diagnosis

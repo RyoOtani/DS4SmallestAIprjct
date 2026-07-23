@@ -539,7 +539,10 @@ class RepositoryAnalyzer:
             lines.append(f"=== {filepath} ===")
             lines.append(f"Symbols ({len(parser.symbols)}):")
             for sym in parser.symbols[:30]:
-                lines.append(f"  {sym.kind:10s} {sym.name:30s} line {sym.line}")
+                type_info = ""
+                if sym.return_type:
+                    type_info = f" → {sym.return_type}"
+                lines.append(f"  {sym.kind:10s} {sym.name:30s} line {sym.line}{type_info}")
             
             if parser.imports:
                 lines.append(f"\nImports: {', '.join(parser.imports[:20])}")
@@ -561,3 +564,147 @@ class RepositoryAnalyzer:
                 lines.append(f"  {e.caller} → {e.callee}  ({e.caller_file})")
         
         return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Mypy / Pyright Integration — external type checker for deep type info
+# ═══════════════════════════════════════════════════════════════════════
+
+class ExternalTypeChecker:
+    """
+    Runs external type checkers (mypy, pyright) and parses their output
+    to enrich Symbol type information beyond AST-level inference.
+    
+    Supported checkers: mypy, pyright (pylance)
+    """
+
+    CHECKERS = {
+        "mypy": ["mypy", "--no-error-summary", "--show-error-codes"],
+        "pyright": ["pyright", "--outputjson"],
+    }
+
+    def __init__(self, checker: str = "mypy"):
+        self.checker = checker
+        self._available = self._check_available()
+
+    def _check_available(self) -> bool:
+        import shutil
+        cmd = self.CHECKERS.get(self.checker, [])
+        return bool(cmd and shutil.which(cmd[0]))
+
+    def analyze_file(self, filepath: str) -> dict:
+        """Run type checker on a file and parse type information."""
+        if not self._available:
+            return {"error": f"{self.checker} not installed", "types": []}
+
+        import subprocess
+        try:
+            result = subprocess.run(
+                self.CHECKERS[self.checker] + [filepath],
+                capture_output=True, text=True, timeout=30,
+            )
+            return self._parse_output(result.stdout + result.stderr, filepath)
+        except FileNotFoundError:
+            return {"error": f"{self.checker} not found"}
+        except subprocess.TimeoutExpired:
+            return {"error": "Type check timed out"}
+
+    def _parse_output(self, output: str, filepath: str) -> dict:
+        """Parse mypy output for type annotations and issues.
+
+        Mypy format:
+          file:line: error: message  [error-code]
+          file:line: note: message
+
+        Pyright format (JSON):
+          {"version": "...", "generalDiagnostics": [...], "diagnostics": [...]}
+        """
+        import json
+
+        types = []
+        notes = []
+
+        if self.checker == "pyright":
+            try:
+                data = json.loads(output)
+                for diag in data.get("diagnostics", []):
+                    types.append({
+                        "line": diag.get("range", {}).get("start", {}).get("line", 0) + 1,
+                        "message": diag.get("message", ""),
+                        "severity": diag.get("severity", "information"),
+                        "rule": diag.get("rule", ""),
+                    })
+            except json.JSONDecodeError:
+                pass
+        else:
+            # mypy text output
+            import re
+            for line in output.splitlines():
+                m = re.match(
+                    r'(.+):(\d+):\s+(error|warning|note):\s+(.+)',
+                    line,
+                )
+                if m:
+                    is_error = m.group(3) == "error"
+                    category = "error" if is_error else "note"
+                    types.append({
+                        "file": m.group(1),
+                        "line": int(m.group(2)),
+                        "category": category,
+                        "message": m.group(4),
+                    })
+
+        return {
+            "file": filepath,
+            "checker": self.checker,
+            "issues": len(types),
+            "types": types,
+            "notes": notes,
+        }
+
+    def enrich_symbols(
+        self, parser: "ASTParser", filepath: str,
+    ) -> list[dict]:
+        """Run type checker and update Symbol type information."""
+        result = self.analyze_file(filepath)
+        if "error" in result:
+            return []
+
+        enriched = []
+        type_map: dict[str, str] = {}
+        inferred_types: list[TypeHint] = []
+
+        # Extract type hints from checker output
+        for issue in result.get("types", []):
+            msg = issue.get("message", "")
+            line = issue.get("line", 0)
+
+            # Pattern: 'Variable "x" is of type "int"'
+            var_match = re.search(
+                r'(?:Variable|Argument)\s+"?(\w+)"?\s+(?:is of type|has type)\s+"?([^"]+)"?', msg,
+            )
+            if var_match:
+                name = var_match.group(1)
+                type_str = var_match.group(2)
+                type_map[name] = type_str
+                inferred_types.append(TypeHint(
+                    name=name, type_str=type_str,
+                    confidence=0.9, source=f"{self.checker}",
+                ))
+                enriched.append({"name": name, "type": type_str, "line": line})
+
+            # Pattern: 'Incompatible return type' → extract expected type
+            return_match = re.search(
+                r'(?:Incompatible return value type|Returning).*?"(?:[^"]*)"\s+instead of\s+"?([^"]+)"?', msg,
+            )
+            if return_match:
+                ret_type = return_match.group(1)
+                enriched.append({"return_type": ret_type, "line": line})
+
+        # Update parser symbols with inferred types
+        for sym in parser.symbols:
+            if sym.name in type_map and not sym.return_type:
+                sym.return_type = type_map[sym.name]
+                sym.param_types = {"inferred_return": type_map[sym.name]}
+
+        return enriched

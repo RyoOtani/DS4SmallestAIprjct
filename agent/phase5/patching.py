@@ -248,6 +248,11 @@ def apply_unified_patch(root, patch_text):
     Returns list of changed relative paths.
     """
     root = Path(root).resolve()
+
+    # Phase 0: Reject binary patch text immediately
+    if any(b'\x00' in line.encode("utf-8", errors="surrogateescape")
+           for line in patch_text.splitlines()):
+        raise PatchError("Binary content detected in patch — not supported")
     
     # Phase 1: Parse and validate all changes (atomic — no writes yet)
     changes, changed_paths = _parse_patch(patch_text, root)
