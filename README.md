@@ -1,203 +1,185 @@
-# TinyLLM — A lightweight C-based LLM inference and AI runtime — ds4 Personal AI
+# TinyLLM — ds4 Personal AI 〜 自律 AI ソフトウェアエンジニア基盤
 
-> 「インターネット不要、月額課金なし。個人の PC で GPT‑5 に匹敵する開発生産性を発揮し、かつ自ら成長し続ける AI パートナー」
+> **「インターネット不要、月額課金なし。個人の PC で GPT‑5 に匹敵する開発生産性を発揮し、かつ自ら成長し続ける AI パートナー」**
 
-**tinyllm** は antirez のミニマリズム (ds4) と DeepSeek の効率性 (MoE/MLA/MTP) を融合した、C 言語約 5,000〜10,000 行の単一バイナリ AI システムです。
+**TinyLLM** は antirez のミニマリズム (ds4) と DeepSeek の効率性 (MoE/MLA/MTP) を融合した、
+C 言語約 4,200 行の単一バイナリ推論エンジン + Python エージェント + 最先端モデルアーキテクチャの
+**完全自律 AI ソフトウェアエンジニア基盤**です。
 
+```bash
+$ tinyllm run model.gguf                 # CLI 対話モード
+$ tinyllm serve model.gguf 8420          # HTTP API サーバー
+$ tinyllm agent model.gguf "バグを修正して" # 自律エージェント
+$ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分散学習
 ```
-$ tinyllm run model.gguf          # CLI 対話モード
-$ tinyllm serve model.gguf 8420   # HTTP API サーバー
-$ tinyllm agent model.gguf "バグを修正して"  # 自律エージェント
-```
+
+## 📊 プロジェクト規模
+
+| 指標 | 値 |
+|------|-----|
+| 全ファイル数 | **~100 ファイル** |
+| 総コード行数 | **~17,000 行** |
+| C ランタイム | 4,208 行 (86 KB バイナリ) |
+| Python エージェント | ~7,000 行 |
+| AI モデル定義 | ~3,000 行 |
+| モデルスケール | nano 1.5B 〜 giga 6.7T (9段階) |
+| 完了フェーズ | Phase 1〜7 / 9 |
+| テスト | 19 tests (Phase 6: 6, Phase 7: 6, Model: 7) |
 
 ## 特徴
 
 | 項目 | 値 |
 |------|-----|
-| バイナリサイズ | ~200 KB (C コードのみ) |
-| メモリ使用量 | 2〜8 GB (モデル込み) |
-| 最小モデル | 活性化 600M〜2.4B パラメータ |
-| 推奨モデル | 活性化 7B MoE (全パラ 30B) |
-| 外部依存 | ゼロ (同梱不要) |
-| 設定ファイル | 不要 (起動時自動スキャン) |
-| 量子化 | GGUF Q4_0 / Q6_K 混合 |
-| コンテキスト長 | 最大 8192 トークン |
+| バイナリサイズ | 86 KB (C コードのみ) |
+| モデル範囲 | 活性化 0.5B〜314B (総 1.5B〜6.7T) |
+| 外部依存 | ゼロ (C ランタイム), pip install のみ (Python) |
+| 量子化 | GGUF Q4_0 / Q6_K / Q8_0 混合 |
+| 分散学習 | FSDP / DeepSpeed ZeRO-3 / TP/PP/DP/EP |
+| 混合精度 | BF16 / FP16 / FP8 |
+| 推論バックエンド | C (NEON/AVX2/Accelerate SIMD) |
+| 設定 | 不要 (auto-detect) |
 
 ## アーキテクチャ
 
 ```
-+-----------------------+
-| tinyllm (C 単一バイナリ) |
-| ├─ モデルローダー (GGUF)  |
-| ├─ MoE ルーター          |
-| ├─ MLA アテンション       |
-| ├─ トークナイザー (BPE)    |
-| ├─ サンプラー             |
-| ├─ エージェントループ      |
-| ├─ HTTP サーバー          |
-| ├─ RAG ベクトル検索       |
-| └─ 長期記憶ストア         |
-+-----------------------+
-         │ パイプ / サブプロセス
-         ↓
-+-----------------------+
-| 外部ツール群            |
-| ├─ tree-sitter (AST)   |
-| ├─ codeindex (依存グラフ)|
-| ├─ gcc/pytest (テスト)   |
-| ├─ ベクトル検索 (RAG)    |
-| └─ Docker/podman (sandbox)|
-+-----------------------+
+┌──────────────────────────┐     ┌───────────────────────────┐
+│  tinyllm (C 単一バイナリ)  │     │  外部ツール群              │
+│  ├─ GGUF ローダー (MoE)    │     │  ├─ tree-sitter (AST)     │
+│  ├─ MLA アテンション       │────▶│  ├─ gcc/pytest (テスト)    │
+│  ├─ MoE ルーター          │ パイプ│  ├─ ベクトル検索 (RAG)     │
+│  ├─ BPE トークナイザー     │◀────│  ├─ Docker (サンドボックス) │
+│  ├─ 投機的デコード         │     │  └─ mypy/pyright (型検査)  │
+│  ├─ HTTP/CLI/デーモン      │     └───────────────────────────┘
+│  ├─ RAG + 長期記憶        │
+│  └─ 自己修正エージェント    │
+└──────────────────────────┘
+┌──────────────────────────┐
+│  Python エージェント群     │
+│  ├─ Phase 3: マルチ協調   │
+│  ├─ Phase 4: SW エンジニア│
+│  ├─ Phase 5: 自律コーディング│
+│  ├─ Phase 6: 深いコード理解│
+│  │   ├─ 多言語AST/CallGraph│
+│  │   ├─ アーキテクチャ分析 │
+│  │   ├─ Quality Pipeline  │
+│  │   ├─ Critic + Debugger │
+│  │   └─ 構造化Tool Calling │
+│  └─ Phase 7: 分散AI基盤   │
+│      ├─ 3D並列 (DP/TP/PP) │
+│      ├─ FSDP/DeepSpeed    │
+│      ├─ BF16/FP16/FP8     │
+│      └─ NCCL通信+分散CKPT  │
+└──────────────────────────┘
+┌──────────────────────────┐
+│  AI モデル (PyTorch)      │
+│  ├─ 9スケール (1.5B〜6.7T)│
+│  ├─ MLA + MoE + MTP       │
+│  ├─ SwiGLU + RoPE(YaRN)   │
+│  ├─ 訓練パイプライン       │
+│  └─ GGUF Q4_0/Q6_K エクスポート│
+└──────────────────────────┘
 ```
 
-## 主要アルゴリズム
+## 主要技術
 
-- **MLA** (Multi-head Latent Attention): KV キャッシュを低ランク潜在空間に圧縮。メモリ使用量を 1/8 に削減
-- **MoE** (Mixture of Experts): トークンごとにトップ 2 エキスパートのみ計算。活性化パラメータを大幅削減
-- **MTP** (Multi-Token Prediction): 次の N トークンを同時予測。知識密度を向上
-- **SwiGLU** FFN: ゲーテッド活性化関数による高品質な非線形変換
+- **MLA** (Multi-head Latent Attention): KV キャッシュを 1/8 に圧縮
+- **MoE** (Mixture of Experts): 256+ エキスパート、top-8 のみ活性化
+- **MTP** (Multi-Token Prediction): 最大 8 トークン同時予測
+- **SwiGLU** FFN: ゲーテッド活性化、FP8 対応
+- **RoPE + YaRN**: 32K コンテキスト対応の位置エンコーディング
+- **投機的デコード**: N-gram draft + 一括検証
+- **3D 並列**: データ/テンソル/パイプライン + エキスパート並列
+- **アトミックパッチ**: バイナリ検出、事前検証、ロールバック
+- **停止検出**: 同一エラー/診断のハッシュ+テキスト比較
+- **mypy/pyright 連携**: 外部型チェッカーによる深い型推論
 
 ## ビルド
 
 ```bash
-# 必要なもの: C11 コンパイラ + POSIX 環境
-make
+# C ランタイム (C11 + POSIX)
+make              # リリースビルド
+make debug        # ASAN デバッグビルド
+make install      # → /usr/local/bin/tinyllm
 
-# デバッグビルド
-make debug
-
-# インストール
-make install    # → /usr/local/bin/tinyllm
+# Python (pip)
+pip install -r requirements.txt
 ```
 
-## 使い方
-
-### 1. モデルの準備
+## クイックスタート
 
 ```bash
-# 蒸留で小さなモデルを作る
-python python/train/distill.py \
-  --teacher deepseek-ai/DeepSeek-V3 \
-  --student Qwen/Qwen3-5-9B \
-  --data data/code_train.jsonl \
-  --output output/student.gguf
+# モデル作成
+python3 -c "from model import create_model; m = create_model('small'); print('OK')"
 
-# GRPO でコード生成能力を強化
-python python/train/grpo_train.py \
-  --model output/student_model \
-  --problems data/code_problems.jsonl \
-  --output output/grpo_finetuned
+# コードレビュー
+python3 -m agent.phase6.cli review src/main.c
 
-# LoRA アダプターでユーザー適応
-python python/train/lora_adapter.py \
-  --model output/student_model \
-  --feedback data/user_feedback.jsonl \
-  --output output/lora_adapter.bin
-```
+# リポジトリ分析
+python3 -m agent.phase6.cli scan .
 
-### 2. CLI で対話
+# アーキテクチャ診断
+python3 -m agent.phase6.cli analyze .
 
-```bash
-tinyllm run model.gguf
+# 品質パイプライン
+python3 -m agent.phase6.cli quality . --fix
 
->>> Python で FizzBuzz を書いて
-def fizzbuzz(n):
-    for i in range(1, n+1):
-        if i % 15 == 0: print("FizzBuzz")
-        elif i % 3 == 0: print("Fizz")
-        elif i % 5 == 0: print("Buzz")
-        else: print(i)
+# 分散学習 (8 GPU)
+torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge
 
-[0.3s, 3.2 GB RSS]
-```
-
-### 3. HTTP API サーバー
-
-```bash
-tinyllm serve model.gguf 8420
-
-# 別ターミナルで
-curl -X POST http://localhost:8420/v1/completions \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "// C function to reverse a string\nchar* reverse(", "max_tokens": 256}'
-```
-
-### 4. 自律エージェント
-
-```bash
-tinyllm agent model.gguf "src/utils.c のバグを調査して修正し、テストが通ることを確認して"
-```
-
-## ディレクトリ構造
-
-```
-tinyllm/
-├── include/
-│   ├── config.h          # コンパイル時定数・プラットフォーム検出
-│   └── tinyllm.h         # 全 API 宣言
-├── src/
-│   ├── main.c            # エントリーポイント
-│   ├── model.c           # GGUF モデルローダー
-│   ├── transformer.c     # Transformer 順伝播
-│   ├── attention.c       # MLA + RMS Norm + RoPE
-│   ├── moe.c             # MoE ルーティング + SwiGLU FFN
-│   ├── quantize.c        # 量子化・逆量子化 (Q4_0, Q8_0)
-│   ├── tokenizer.c       # BPE トークナイザー (FIM 対応)
-│   ├── sampler.c         # Top-k / Top-p サンプリング
-│   ├── inference.c       # 推論ループ・自己回帰生成
-│   ├── agent.c           # 自己修正エージェントループ
-│   ├── tools.c           # 外部ツール実行
-│   ├── http.c            # 最小 HTTP サーバー
-│   ├── rag.c             # RAG ベクトル検索
-│   ├── memory.c          # 長期記憶ストア
-│   └── util.c            # メモリ管理・I/O・ハッシュ
-├── python/
-│   ├── train/
-│   │   ├── distill.py    # 知識蒸留 (teacher → student)
-│   │   ├── grpo_train.py # GRPO 強化学習
-│   │   └── lora_adapter.py # LoRA 適応学習
-│   └── tools/
-│       ├── code_analyzer.py # AST 解析・依存グラフ
-│       └── sandbox.py       # サンドボックス実行
-├── agent/
-│   ├── phase6/           # AI SW Engineer Professional
-│   │   ├── code_understanding.py  # 多言語AST/CallGraph
-│   │   ├── architect.py  # アーキテクチャ分析
-│   │   ├── quality.py    # Lint/Format/TypeCheck
-│   │   ├── critic.py     # コードレビュー+Debug
-│   │   ├── tool_calling.py # 構造化ツール呼出
-│   │   └── orchestrator.py # Phase 6 統合パイプライン
-│   └── phase7/           # Distributed AI Platform
-│       ├── parallelism.py # TP/PP/DP/EP 3D並列
-│       ├── distributed_trainer.py # FSDP/DeepSpeed
-│       ├── mixed_precision.py # BF16/FP16/FP8
-│       └── nccl_ops.py   # NCCL通信+分散CKPT
-├── model/                # AI モデルアーキテクチャ
-│   ├── config.py         # 9スケール (1.5B〜6.7T)
-│   ├── architecture.py   # MLA+MoE+MTP Transformer
-│   └── layers/           # カスタムレイヤー
-├── Makefile
-├── CMakeLists.txt
-├── requirements.txt
-└── README.md
+# テスト実行
+python3 tests/test_phase6.py
+python3 tests/test_phase7.py
+python3 tests/test_model.py
 ```
 
 ## フェーズ別ロードマップ
 
-| フェーズ | ドキュメント | 目標 | 状態 |
-|---------|-------------|------|------|
-| Phase 1 | — | TinyLLM Runtime (推論エンジン) | ✅ |
-| Phase 2 | [`PHASE2.md`](PHASE2.md) | 知識注入、蒸留、指示チューニング | ✅ |
-| Phase 3 | [`PHASE3_MULTI_AGENT.md`](PHASE3_MULTI_AGENT.md) | マルチエージェント協調 | ✅ |
-| Phase 4 | [`PHASE4_AI_SOFTWARE_ENGINEER.md`](PHASE4_AI_SOFTWARE_ENGINEER.md) | AI ソフトウェアエンジニア | ✅ |
-| Phase 5 | [`PHASE5_AUTONOMOUS_CODING.md`](PHASE5_AUTONOMOUS_CODING.md) | 完全自律コーディング | ✅ |
-| Phase 6 | — | AI Software Engineer Professional | ✅ |
-| Phase 7 | — | Distributed AI Platform | ✅ |
-| Phase 8 | — | Self Improving AI | 📋 |
-| Phase 9 | — | AI Research Scientist | 📋 |
+| フェーズ | 内容 | 状態 |
+|---------|------|------|
+| Phase 1 | TinyLLM Runtime (C 推論エンジン) | ✅ |
+| Phase 2 | Repository Understanding (RAG, コード検索) | ✅ |
+| Phase 3 | Multi-Agent Foundation (Planner, Coder, Memory) | ✅ |
+| Phase 4 | AI Software Engineer (Provider, Tools, Planning) | ✅ |
+| Phase 5 | Autonomous Coding Loop (Build→Test→Fix→Retry) | ✅ |
+| Phase 6 | AI SW Engineer Professional (AST, Arch, Quality, Critic, Debug) | ✅ |
+| Phase 7 | Distributed AI Platform (FSDP/DeepSpeed, TP/PP, FP8, NCCL) | ✅ |
+| Phase 8 | Self Improving AI (自律改善、Online LoRA、経験学習) | 📋 |
+| Phase 9 | AI Research Scientist (論文読解、実験自動化、新アルゴリズム提案) | 📋 |
 
-📖 **全体構想**: [`VISION.md`](VISION.md) を参照
+📖 全体構想: [`VISION.md`](VISION.md) · [`PROJECT_PLAN.md`](PROJECT_PLAN.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md)
+
+---
+
+## 🤝 協力者募集 — 計算資源が足りません！
+
+TinyLLM は**ソフトウェアアーキテクチャとして完成**しています。
+しかし、**実際にモデルを訓練するための GPU 計算資源が圧倒的に不足**しています。
+
+### 必要なもの
+
+| リソース | 用途 | 目安 |
+|---------|------|------|
+| **GPU クラスタ** | モデル訓練・蒸留 | A100 8〜64 枚級 × 2〜4 週間 |
+| **大規模データセット** | 事前学習・指示チューニング | 1T+ トークンの高品質コード/対話データ |
+| **クラウドクレジット** | AWS/GCP/Azure での実験 | $5,000〜$50,000 相当 |
+| **人的リソース** | C 最適化, モデル蒸留, テスト | コア貢献者 |
+
+### 協力方法
+
+- 💻 **コード**: PR 大歓迎！ [`CONTRIBUTING.md`](CONTRIBUTING.md) (準備中)
+- 🖥️ **GPU 提供**: 遊休 GPU があれば訓練に活用させてください
+- 💰 **スポンサー**: [GitHub Sponsors](https://github.com/sponsors/RyoOtani) で支援
+- 📊 **データ提供**: 高品質コード/対話データの寄贈
+- 🧪 **テスト**: 様々な環境での動作検証
+
+### 連絡先
+
+- GitHub Issues: [Issue を作成](https://github.com/RyoOtani/DS4SmallestAIprjct/issues)
+- メール: (準備中)
+- Twitter/X: (準備中)
+
+> **「単一バイナリの哲学」と「最先端 AI」の融合に、あなたの力を貸してください。**
 
 ## ライセンス
 
-MIT License
+MIT License — 自由に使って、改良して、世界を変えてください。
