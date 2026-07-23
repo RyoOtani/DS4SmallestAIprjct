@@ -63,17 +63,23 @@ def apply_rotary_emb(
     xk: torch.Tensor,
     freqs_cis: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Apply RoPE to query and key tensors."""
+    """Apply RoPE to query and key tensors.
+    
+    Args:
+        xq: [batch, seq, heads, head_dim]
+        xk: [batch, seq, heads, head_dim]
+        freqs_cis: [batch, seq, head_dim/2] or [seq, head_dim/2]
+    """
+    # Reshape: [..., head_dim] → [..., head_dim/2, 2]
     xq_ = xq.float().reshape(*xq.shape[:-1], -1, 2)
     xk_ = xk.float().reshape(*xk.shape[:-1], -1, 2)
     
-    xq_out = torch.view_as_complex(xq_)
+    xq_out = torch.view_as_complex(xq_)  # [B, T, heads, dim/2]
     xk_out = torch.view_as_complex(xk_)
     
-    # Broadcast freqs_cis to match batch & head dims
-    # xq: [batch, heads, seq, dim]
-    # freqs_cis: [seq, dim/2]
-    freqs_cis = freqs_cis.unsqueeze(0).unsqueeze(0)  # [1, 1, seq, dim/2]
+    # Broadcast freqs_cis to match: [B, T, dim/2] → [B, T, 1, dim/2]
+    while freqs_cis.dim() < xq_out.dim():
+        freqs_cis = freqs_cis.unsqueeze(2)  # interleave heads dim
     
     xq_out = xq_out * freqs_cis
     xk_out = xk_out * freqs_cis
