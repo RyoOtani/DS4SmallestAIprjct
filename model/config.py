@@ -80,30 +80,52 @@ class ModelConfig:
 
     @property
     def total_params_estimate(self) -> int:
-        """Rough estimate of total parameters."""
+        """Accurate total parameter count."""
         D = self.hidden_dim
         L = self.n_layers
         V = self.vocab_size
+        H = self.n_heads
+        d = self.head_dim
 
-        # Embedding: V * D
+        # Embedding
         emb = V * D
 
-        # Per layer:
-        # Attention: 4 * D * D (Q, K, V, O) — simplified
-        attn = 4 * D * D
-        # MoE: n_experts * 3 * D * inter_dim
-        moe = self.n_experts * 3 * D * self.expert_inter_dim
-        # FFN: 3 * D * ffn_inter_dim
-        ffn = 3 * D * self.ffn_inter_dim
-        # RMSNorm: 2 * D
-        norm = 2 * D
+        per_layer = 0
 
-        per_layer = attn + moe + ffn + norm
+        # Attention: q_proj + kv_compress + k_up + v_up + o_proj
+        if self.use_mla:
+            attn = (H * d * D) + (self.kv_latent_dim * D) + (H * d * self.kv_latent_dim) * 2 + (H * d * D)
+        else:
+            attn = (H * d * D) + (self.n_kv_heads_effective * d * D) * 2 + (H * d * D)
+        per_layer += attn
+
+        # RMS Norm × 2
+        per_layer += 2 * D
+
+        # MoE: gate (n_experts * D) + n_experts × (3 × inter_dim × D) + shared × (3 × inter_dim × D)
+        if self.use_moe:
+            gate_params = self.n_experts * D
+            expert_params = self.n_experts * 3 * D * self.expert_inter_dim
+            shared_params = self.shared_experts * 3 * D * self.expert_inter_dim
+            per_layer += gate_params + expert_params + shared_params
+        else:
+            per_layer += 3 * D * self.ffn_inter_dim  # SwiGLU: gate + up + down
+
         total = emb + L * per_layer
 
         # LM head (if not tied)
         if not self.tie_word_embeddings:
             total += V * D
+
+        # MTP heads: depth × (2*D^2 + 4*D^2 * depth_sub + D*V)
+        if self.use_mtp and self.mtp_depth > 0:
+            mtp_params = self.mtp_depth * (
+                2 * D * D +  # input_proj
+                2 * 3 * D * (D * 4) +  # sub-layer FFNs (2 sub-layers)
+                D +  # final_norm
+                D * V  # output projection
+            )
+            total += mtp_params
 
         return total
 
@@ -231,7 +253,205 @@ TINYLLM_CONFIGS = {
         use_mtp=True,
         mtp_depth=2,
     ),
+
+    # ═══════════════════════════════════════════════════════════════
+    # SUPER-SCALE MODELS (200B → 2.5T total params)
+    # ═══════════════════════════════════════════════════════════════
+
+    # ── X-Large: 40B active / 200B total ─────────────────────────
+    "xlarge": ModelConfig(
+        name="tinyllm-xlarge",
+        hidden_dim=6144,
+        n_layers=48,
+        n_heads=48,
+        n_kv_heads=8,
+        head_dim=128,
+        use_mla=True,
+        kv_latent_dim=768,
+        ffn_inter_dim=16384,
+        use_moe=True,
+        n_experts=128,
+        n_active_experts=8,
+        expert_inter_dim=3072,
+        shared_experts=4,
+        use_mtp=True,
+        mtp_depth=4,
+        sliding_window=4096,
+        rope_scaling={"type": "yarn", "factor": 4.0, "original_max_position_embeddings": 8192},
+        use_qk_norm=True,
+        train_dtype="bfloat16",
+        gradient_clip=0.5,
+    ),
+
+    # ── XX-Large: 90B active / 500B total ────────────────────────
+    "xxlarge": ModelConfig(
+        name="tinyllm-xxlarge",
+        hidden_dim=8192,
+        n_layers=64,
+        n_heads=64,
+        n_kv_heads=8,
+        head_dim=128,
+        use_mla=True,
+        kv_latent_dim=1024,
+        ffn_inter_dim=20480,
+        use_moe=True,
+        n_experts=192,
+        n_active_experts=8,
+        expert_inter_dim=4096,
+        shared_experts=6,
+        use_mtp=True,
+        mtp_depth=6,
+        sliding_window=4096,
+        rope_scaling={"type": "yarn", "factor": 8.0, "original_max_position_embeddings": 8192},
+        use_qk_norm=True,
+        train_dtype="bfloat16",
+        gradient_clip=0.3,
+    ),
+
+    # ── Mega: 180B active / 1T total ─────────────────────────────
+    "mega": ModelConfig(
+        name="tinyllm-mega",
+        hidden_dim=10240,
+        n_layers=72,
+        n_heads=80,
+        n_kv_heads=8,
+        head_dim=128,
+        use_mla=True,
+        kv_latent_dim=1280,
+        ffn_inter_dim=25600,
+        use_moe=True,
+        n_experts=256,
+        n_active_experts=8,
+        expert_inter_dim=5120,
+        shared_experts=8,
+        use_mtp=True,
+        mtp_depth=8,
+        sliding_window=4096,
+        rope_scaling={"type": "yarn", "factor": 16.0, "original_max_position_embeddings": 8192},
+        use_qk_norm=True,
+        train_dtype="bfloat16",
+        gradient_clip=0.2,
+        max_seq_len=16384,
+        vocab_size=131072,
+    ),
+
+    # ── Giga: 350B active / 2T total ────────────────────────────
+    "giga": ModelConfig(
+        name="tinyllm-giga",
+        hidden_dim=12288,
+        n_layers=88,
+        n_heads=96,
+        n_kv_heads=8,
+        head_dim=128,
+        use_mla=True,
+        kv_latent_dim=1536,
+        ffn_inter_dim=30720,
+        use_moe=True,
+        n_experts=320,
+        n_active_experts=8,
+        expert_inter_dim=6144,
+        shared_experts=12,
+        use_mtp=True,
+        mtp_depth=8,
+        sliding_window=8192,
+        rope_scaling={"type": "yarn", "factor": 32.0, "original_max_position_embeddings": 8192},
+        use_qk_norm=True,
+        train_dtype="bfloat16",
+        gradient_clip=0.1,
+        max_seq_len=32768,
+        vocab_size=131072,
+    ),
 }
+
+
+def create_custom_config(
+    total_params_b: float,
+    active_ratio: float = 0.08,
+    n_layers: int = 0,
+    name: str = "tinyllm-custom",
+) -> ModelConfig:
+    """Create a model config targeting a specific total parameter count.
+
+    Args:
+        total_params_b: Target total parameters in billions (e.g. 500 for 500B)
+        active_ratio: Desired active/total ratio (default 8% via MoE)
+        n_layers: Number of layers (0 = auto-select based on size)
+        name: Model name
+
+    Returns:
+        ModelConfig with dimensions scaled to the target parameter count
+
+    Scaling follows Kaplan et al. optimal ratios:
+      - hidden_dim scales with sqrt(total_params)
+      - n_layers scales with ~log(total_params)
+      - ffn_inter_dim ≈ 3.5 × hidden_dim
+    """
+    import math
+
+    # Total parameters including embedding (which is V * D)
+    # We'll solve for hidden_dim given the asymptotic layer contribution
+    total = total_params_b * 1e9
+
+    if n_layers <= 0:
+        # Depth scaling: large models need more layers but diminishing returns
+        n_layers = max(24, int(12 * math.log(total_params_b + 1)))
+
+    # Estimate: total ≈ n_layers * (4*D^2 + n_experts * 3*D*inter_dim + 3*D*ffn_inter + 2*D) + 2*V*D
+    # The dominant term is MoE: n_layers * n_experts * 3*D*expert_inter_dim
+    # Let expert_inter_dim ≈ D/2 (optimized for MoE ratio)
+    # Then total ≈ n_layers * n_experts * 3 * D * (D/2) = 1.5 * n_layers * n_experts * D^2
+    # So D ≈ sqrt(total / (1.5 * n_layers * n_experts))
+
+    n_experts = max(64, int(total_params_b * 1.5))  # ~1.5 experts per B params
+    n_experts = (n_experts // 64) * 64  # round to 64
+    n_experts = min(n_experts, 2048)
+
+    # Solve for hidden_dim
+    denom = 1.5 * n_layers * n_experts
+    D = int(math.sqrt(total / max(denom, 1)))
+    D = ((D // 256) + 1) * 256  # round to multiple of 256
+
+    # Clamp to reasonable range
+    D = max(1024, min(D, 24576))
+
+    # n_heads: 1 head per 128 dim
+    n_heads = D // 128
+    n_heads = max(8, (n_heads // 8) * 8)  # multiple of 8
+
+    # Expert inter dim = D/2 (for ~1:4 compute ratio)
+    expert_inter_dim = ((D // 2) // 256 + 1) * 256
+
+    # FFN inter dim = 3.5 * D
+    ffn_inter_dim = ((int(D * 3.5)) // 256 + 1) * 256
+
+    # KV latent dim
+    kv_latent_dim = ((D // 8) // 64 + 1) * 64
+
+    n_active = 8 if total_params_b > 100 else 6
+    mtp_depth = min(8, max(1, int(math.log2(total_params_b + 1)) - 1))
+
+    return ModelConfig(
+        name=name,
+        hidden_dim=D,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        n_kv_heads=min(8, n_heads // 4),
+        head_dim=128,
+        use_mla=True,
+        kv_latent_dim=kv_latent_dim,
+        ffn_inter_dim=ffn_inter_dim,
+        use_moe=True,
+        n_experts=n_experts,
+        n_active_experts=n_active,
+        expert_inter_dim=expert_inter_dim,
+        shared_experts=max(1, n_experts // 64),
+        use_mtp=mtp_depth > 0,
+        mtp_depth=mtp_depth,
+        sliding_window=4096 if D > 4096 else 0,
+        use_qk_norm=D > 8192,
+        max_seq_len=16384 if D > 8192 else 8192,
+        vocab_size=131072 if D > 8192 else 65536,
+    )
 
 
 def get_config(name: str) -> ModelConfig:
