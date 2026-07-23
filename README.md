@@ -54,6 +54,12 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 │  └─ 自己修正エージェント    │
 └──────────────────────────┘
 ┌──────────────────────────┐
+│  Cloud GPU Launcher       │
+│  ├─ RunPod / VastAI       │
+│  ├─ GPUSOROBAN / Lambda   │
+│  └─ AWS / Azure / GCP     │
+└──────────────────────────┘
+┌──────────────────────────┐
 │  Python エージェント群     │
 │  ├─ Phase 3: マルチ協調   │
 │  ├─ Phase 4: SW エンジニア│
@@ -114,6 +120,7 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 - **アルゴリズム提案**: 既知技術の組み合わせによる新規アルゴリズム創出・新規性/実現性/インパクト評価
 - **統計的仮説検証**: Welchのt検定・効果量(Cohen's d)・多重比較補正(Bonferroni/Holm)
 - **研究レポート生成**: Markdown + LaTeX 形式の自動論文執筆
+- **クラウドGPU抽象化**: RunPod/VastAI/GPUSOROBAN/Lambda/AWS/Azure/GCP の統一インターフェース
 
 ## ビルド
 
@@ -170,6 +177,12 @@ python3 -m agent.phase9.cli propose --problem "efficient LLM inference" --techni
 python3 -m agent.phase9.cli hypothesis test --control "0.85,0.86,0.84" --treatment "0.88,0.89,0.87"
 python3 -m agent.phase9.cli research --topic "efficient transformer attention"
 python3 -m agent.phase9.cli status
+
+# クラウドGPU起動 (プロバイダー非依存)
+python3 -m agent.cloud.launcher compare --config medium --gpus 8 --gpu-type a100-80gb
+python3 -m agent.cloud.launcher launch --provider runpod --config xlarge
+python3 -m agent.cloud.launcher prices --provider vastai
+python3 -m agent.cloud.launcher status --provider aws
 ```
 
 ## フェーズ別ロードマップ
