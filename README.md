@@ -23,8 +23,8 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 | Python エージェント | ~7,000 行 |
 | AI モデル定義 | ~3,000 行 |
 | モデルスケール | nano 1.5B 〜 giga 6.7T (9段階) |
-| 完了フェーズ | Phase 1〜7 / 9 |
-| テスト | 19 tests (Phase 6: 6, Phase 7: 6, Model: 7) |
+| 完了フェーズ | Phase 1〜8 / 9 |
+| テスト | 69 tests (Phase 6: 6, Phase 7: 6, Phase 8: 50, Model: 7) |
 
 ## 特徴
 
@@ -64,11 +64,17 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 │  │   ├─ Quality Pipeline  │
 │  │   ├─ Critic + Debugger │
 │  │   └─ 構造化Tool Calling │
-│  └─ Phase 7: 分散AI基盤   │
-│      ├─ 3D並列 (DP/TP/PP) │
-│      ├─ FSDP/DeepSpeed    │
-│      ├─ BF16/FP16/FP8     │
-│      └─ NCCL通信+分散CKPT  │
+│  ├─ Phase 7: 分散AI基盤   │
+│  │   ├─ 3D並列 (DP/TP/PP) │
+│  │   ├─ FSDP/DeepSpeed    │
+│  │   ├─ BF16/FP16/FP8     │
+│  │   └─ NCCL通信+分散CKPT  │
+│  └─ Phase 8: 自己改善AI   │
+│      ├─ 自己評価+改善サイクル│
+│      ├─ 経験再生+失敗DB    │
+│      ├─ LoRAオンライン学習  │
+│      ├─ メタ学習(戦略最適化)│
+│      └─ 統合Orchestrator   │
 └──────────────────────────┘
 ┌──────────────────────────┐
 │  AI モデル (PyTorch)      │
@@ -92,6 +98,11 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 - **アトミックパッチ**: バイナリ検出、事前検証、ロールバック
 - **停止検出**: 同一エラー/診断のハッシュ+テキスト比較
 - **mypy/pyright 連携**: 外部型チェッカーによる深い型推論
+- **自律改善ループ**: 自己評価→診断→修正→測定の収束サイクル
+- **経験再生**: 成功/失敗の経験を保存・検索し、類似タスクで再利用
+- **障害データベース**: エラーパターンをハッシュ化して検索、過去の修正方法を提案
+- **LoRA オンライン学習**: ベースモデル凍結・劣化時自動ロールバック・安全性ガードレール
+- **メタ学習**: タスク横断パターン認識・戦略最適化・few-shot プロンプト生成
 
 ## ビルド
 
@@ -129,7 +140,16 @@ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge
 # テスト実行
 python3 tests/test_phase6.py
 python3 tests/test_phase7.py
+python3 tests/test_phase8.py
 python3 tests/test_model.py
+
+# 自己改善AI
+python3 -m agent.phase8.cli evaluate --test-command "python3 tests/"
+python3 -m agent.phase8.cli replay --task-type code_generation
+python3 -m agent.phase8.cli failures
+python3 -m agent.phase8.cli skills
+python3 -m agent.phase8.cli adapters
+python3 -m agent.phase8.cli status
 ```
 
 ## フェーズ別ロードマップ
@@ -143,7 +163,7 @@ python3 tests/test_model.py
 | Phase 5 | Autonomous Coding Loop (Build→Test→Fix→Retry) | ✅ |
 | Phase 6 | AI SW Engineer Professional (AST, Arch, Quality, Critic, Debug) | ✅ |
 | Phase 7 | Distributed AI Platform (FSDP/DeepSpeed, TP/PP, FP8, NCCL) | ✅ |
-| Phase 8 | Self Improving AI (自律改善、Online LoRA、経験学習) | 📋 |
+| Phase 8 | Self Improving AI (自律改善、Online LoRA、経験学習) | ✅ |
 | Phase 9 | AI Research Scientist (論文読解、実験自動化、新アルゴリズム提案) | 📋 |
 
 📖 全体構想: [`VISION.md`](VISION.md) · [`PROJECT_PLAN.md`](PROJECT_PLAN.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md)
