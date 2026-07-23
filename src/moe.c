@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 /* ── SwiGLU activation: x * sigmoid(x * beta) ────────────────────── */
 static inline float silu(float x) {

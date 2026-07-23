@@ -12,6 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 #ifndef MIN
 #define MIN(a,b) ((a)<(b)?(a):(b))
@@ -70,14 +73,13 @@ void tl_rms_norm(const float *x, const float *w, float *y,
 
 #if defined(__AVX2__)
     __m256 rms_vec = _mm256_set1_ps(rms);
-    int i;
-    for (i = 0; i + 7 < dim; i += 8) {
+    for (int i = 0; i + 7 < dim; i += 8) {
         __m256 xv = _mm256_loadu_ps(x + i);
         __m256 wv = _mm256_loadu_ps(w + i);
         __m256 yv = _mm256_mul_ps(_mm256_mul_ps(xv, rms_vec), wv);
         _mm256_storeu_ps(y + i, yv);
     }
-    for (; i < dim; i++) y[i] = x[i] * rms * w[i];
+    for (int i = ((dim/8)*8); i < dim; i++) y[i] = x[i] * rms * w[i];
 #else
     for (int i = 0; i < dim; i++) y[i] = x[i] * rms * w[i];
 #endif

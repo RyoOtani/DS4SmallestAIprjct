@@ -60,7 +60,7 @@ char *tl_read_file(const char *path, size_t *out_len) {
 }
 
 /* ── SHA-256 (public domain implementation, compact) ─────────────── */
-#ifdef TL_HAS_ACCELERATE
+#if TL_HAS_ACCELERATE
   /* Use CommonCrypto on macOS */
   #include <CommonCrypto/CommonDigest.h>
   void tl_sha256(const uint8_t *data, size_t len, uint8_t out[32]) {

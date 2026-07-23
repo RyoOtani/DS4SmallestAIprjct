@@ -274,7 +274,7 @@ void tl_matvec_q4(const tl_tensor_t *W, const float *x, float *y,
 /* ── Generic matvec (float weights) ──────────────────────────────── */
 void tl_matvec_f32(const float *W, const float *x, float *y,
                    int rows, int cols) {
-#ifdef TL_HAS_ACCELERATE
+#if TL_HAS_ACCELERATE
     /* Use BLAS: y = alpha * W * x + beta * y */
     float alpha = 1.0f, beta = 0.0f;
     cblas_sgemv(CblasRowMajor, CblasNoTrans,
