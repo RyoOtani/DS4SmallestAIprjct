@@ -32,15 +32,15 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 check_prerequisites() {
     log_info "Checking prerequisites..."
 
-    if ! command -v huggingface-cli &> /dev/null; then
-        log_error "huggingface-cli not found. Install it with:"
+    if ! command -v hf &> /dev/null; then
+        log_error "hf CLI not found. Install it with:"
         echo "  pip install huggingface-hub"
         exit 1
     fi
 
-    if ! huggingface-cli whoami &> /dev/null; then
+    if ! hf auth whoami &> /dev/null; then
         log_error "Not logged in to Hugging Face. Run:"
-        echo "  huggingface-cli login"
+        echo "  hf auth login"
         exit 1
     fi
 
@@ -58,15 +58,12 @@ push_model() {
     log_info "============================================"
 
     # Create repo if it doesn't exist
-    if ! huggingface-cli repo info "${repo_id}" &> /dev/null; then
+    if ! hf repo info "${repo_id}" &> /dev/null; then
         log_info "Creating repository: ${repo_id}"
         if [ "$DRY_RUN" = false ]; then
-            huggingface-cli repo create "tinyllm-${scale}" \
+            hf repo create "tinyllm-${scale}" \
                 --type model \
-                --organization "${HF_NAMESPACE}" \
-                --yes 2>/dev/null || \
-            huggingface-cli repo create "tinyllm-${scale}" \
-                --type model \
+                --namespace "${HF_NAMESPACE}" \
                 --yes 2>/dev/null || true
         fi
     fi
@@ -117,7 +114,7 @@ push_model() {
         log_info "Uploading ${#upload_files[@]} files to ${repo_id}..."
         for f in "${upload_files[@]}"; do
             log_info "  Uploading: $f"
-            huggingface-cli upload "${repo_id}" "$f" "$(basename "$f")" --repo-type model
+            hf upload "${repo_id}" "$f" "$(basename "$f")" --repo-type model
         done
         log_ok "Successfully pushed ${repo_id}"
     fi
@@ -171,7 +168,7 @@ print(f'Config generated: {cfg.name} ({cfg.total_params_estimate//1e6:.0f}M para
 "
 
     if [ "$DRY_RUN" = false ]; then
-        huggingface-cli upload "${repo_id}" "config_tmp_${scale}.json" "config.json" --repo-type model
+        hf upload "${repo_id}" "config_tmp_${scale}.json" "config.json" --repo-type model
         rm -f "config_tmp_${scale}.json"
     fi
 }
