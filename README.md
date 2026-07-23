@@ -167,12 +167,19 @@ tinyllm/
 
 ## フェーズ別ロードマップ
 
-| フェーズ | ドキュメント | 目標 |
-|---------|-------------|------|
-| Phase 2 | [`PHASE2.md`](PHASE2.md) | 知識注入、蒸留、指示チューニング |
-| Phase 3 | [`PHASE3_MULTI_AGENT.md`](PHASE3_MULTI_AGENT.md) | マルチエージェント協調 |
-| Phase 4 | [`PHASE4_AI_SOFTWARE_ENGINEER.md`](PHASE4_AI_SOFTWARE_ENGINEER.md) | AI ソフトウェアエンジニア |
-| Phase 5 | [`PHASE5_AUTONOMOUS_CODING.md`](PHASE5_AUTONOMOUS_CODING.md) | 完全自律コーディング |
+| フェーズ | ドキュメント | 目標 | 状態 |
+|---------|-------------|------|------|
+| Phase 1 | — | TinyLLM Runtime (推論エンジン) | ✅ |
+| Phase 2 | [`PHASE2.md`](PHASE2.md) | 知識注入、蒸留、指示チューニング | ✅ |
+| Phase 3 | [`PHASE3_MULTI_AGENT.md`](PHASE3_MULTI_AGENT.md) | マルチエージェント協調 | ✅ |
+| Phase 4 | [`PHASE4_AI_SOFTWARE_ENGINEER.md`](PHASE4_AI_SOFTWARE_ENGINEER.md) | AI ソフトウェアエンジニア | ✅ |
+| Phase 5 | [`PHASE5_AUTONOMOUS_CODING.md`](PHASE5_AUTONOMOUS_CODING.md) | 完全自律コーディング | ✅ |
+| Phase 6 | — | AI Software Engineer Professional | 🔄 |
+| Phase 7 | — | Distributed AI Platform | 📋 |
+| Phase 8 | — | Self Improving AI | 📋 |
+| Phase 9 | — | AI Research Scientist | 📋 |
+
+📖 **全体構想**: [`VISION.md`](VISION.md) を参照
 
 ## ライセンス
 
