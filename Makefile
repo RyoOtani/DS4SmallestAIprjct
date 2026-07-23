@@ -21,8 +21,8 @@ endif
 # Platform-specific
 UNAME_S  := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-	CFLAGS += -DTL_HAS_ACCELERATE=1
-	LDFLAGS += -framework Accelerate
+	CFLAGS += -DTL_HAS_ACCELERATE=1 -DTL_HAS_METAL=1
+	LDFLAGS += -framework Accelerate -framework Metal -framework Foundation
 	# Check for Apple Silicon native NEON
 	ARCH := $(shell uname -m)
 	ifeq ($(ARCH),arm64)
@@ -59,6 +59,16 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "✓ Built $(TARGET) ($(shell du -sh $(TARGET) | cut -f1))"
+
+# ── Metal shader compilation (macOS only) ─────────────────────────────────
+METALLIB := tinyllm.metallib
+ifeq ($(UNAME_S),Darwin)
+$(METALLIB): src/tinyllm_ops.metal
+	xcrun -sdk macosx metal -O3 -ffast-math -o $@ $<
+	@echo "✓ Metal library compiled ($(shell du -sh $@ | cut -f1))"
+
+all: $(METALLIB)
+endif
 
 %.o: %.c include/*.h
 	$(CC) $(CFLAGS) -c -o $@ $<

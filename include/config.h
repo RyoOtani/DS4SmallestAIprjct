@@ -67,9 +67,11 @@ typedef enum {
   #define ACCELERATE_LAPACK_ILP64
   #include <Accelerate/Accelerate.h>   /* Apple Accelerate for BLAS   */
   #define TL_HAS_ACCELERATE 1
+  #define TL_HAS_METAL 1               /* Metal GPU on Apple Silicon  */
 #elif defined(__linux__)
   #define TL_PLATFORM "linux"
   #define TL_HAS_ACCELERATE 0
+  #define TL_HAS_METAL 0
 #endif
 
 #if defined(__x86_64__) || defined(_M_X64)

@@ -120,7 +120,8 @@ $ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分�
 - **アルゴリズム提案**: 既知技術の組み合わせによる新規アルゴリズム創出・新規性/実現性/インパクト評価
 - **統計的仮説検証**: Welchのt検定・効果量(Cohen's d)・多重比較補正(Bonferroni/Holm)
 - **研究レポート生成**: Markdown + LaTeX 形式の自動論文執筆
-- **クラウドGPU抽象化**: RunPod/VastAI/GPUSOROBAN/Lambda/AWS/Azure/GCP の統一インターフェース
+- **クラウドGPU抽象化**: RunPod/VastAI/GPUSOROBAN/Lambda/AWS/Azure/GCP/Local(Metal/CUDA) の統一インターフェース
+- **Metal GPU バックエンド**: Apple M1/M2/M3/M4 GPU上のmatmul/flash-attention/MoE/RoPE/RMS Norm
 
 ## ビルド
 
@@ -183,6 +184,9 @@ python3 -m agent.cloud.launcher compare --config medium --gpus 8 --gpu-type a100
 python3 -m agent.cloud.launcher launch --provider runpod --config xlarge
 python3 -m agent.cloud.launcher prices --provider vastai
 python3 -m agent.cloud.launcher status --provider aws
+
+# ローカルGPU (Metal/CUDA)
+python3 -m agent.cloud.launcher launch --provider local   # Auto-detect GPU
 ```
 
 ## フェーズ別ロードマップ

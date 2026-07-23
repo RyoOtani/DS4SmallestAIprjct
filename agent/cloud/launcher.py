@@ -20,6 +20,7 @@ from agent.cloud.provider import (
 from agent.cloud.providers import (
     RunPodProvider, VastAIProvider, GPUSorobanProvider,
     LambdaLabsProvider, AWSProvider, AzureProvider, GCPProvider,
+    LocalGPUProvider,
 )
 
 PROVIDER_MAP = {
@@ -33,6 +34,9 @@ PROVIDER_MAP = {
     "aws": AWSProvider,
     "azure": AzureProvider,
     "gcp": GCPProvider,
+    "local": LocalGPUProvider,
+    "metal": LocalGPUProvider,
+    "cuda": LocalGPUProvider,
 }
 
 def load_config() -> dict:
