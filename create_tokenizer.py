@@ -21,19 +21,23 @@ import json, os, argparse
 # ── Training corpus: code-heavy bilingual ──────────────────────
 
 def code_samples():
-    """60% of training data — real code patterns."""
+    """60% of training data — extensive code patterns across 8 languages."""
     return [
-        # Python
-        "import os, sys, json, re, math, time",
-        "from typing import Optional, List, Dict, Tuple, Union",
-        "from dataclasses import dataclass, field",
-        "from collections import defaultdict, deque, Counter, OrderedDict",
-        "from functools import lru_cache, partial, reduce, wraps",
+        # ── Python ──────────────────────────────────────────
+        "import os, sys, json, re, math, time, datetime, logging",
+        "from typing import Optional, List, Dict, Tuple, Union, Any, Callable",
+        "from dataclasses import dataclass, field, asdict",
+        "from collections import defaultdict, deque, Counter, OrderedDict, namedtuple",
+        "from functools import lru_cache, partial, reduce, wraps, cached_property",
         "from pathlib import Path",
+        "from contextlib import contextmanager, suppress, nullcontext",
+        "from itertools import chain, product, permutations, combinations, zip_longest",
         "import numpy as np, torch, torch.nn as nn",
         "import torch.nn.functional as F",
-        "from torch.utils.data import Dataset, DataLoader",
-        "from transformers import AutoModel, AutoTokenizer",
+        "from torch.utils.data import Dataset, DataLoader, IterableDataset",
+        "from torch.optim import AdamW, Adam, SGD",
+        "from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR",
+        "from transformers import AutoModel, AutoTokenizer, AutoConfig",
         "def __init__(self, config: Config) -> None:",
         "class TransformerLayer(nn.Module):",
         "    def forward(self, x: torch.Tensor) -> torch.Tensor:",
@@ -53,66 +57,129 @@ def code_samples():
         "            return await resp.json()",
         "try: result = await process(data)",
         "except ValueError as e: logger.error(f'Invalid: {e}')",
+        "except RuntimeError: raise",
         "finally: cleanup()",
         "@property\ndef name(self) -> str:\n    return self._name",
         "@staticmethod\ndef from_config(cfg: dict) -> 'Model':",
+        "@classmethod\ndef create(cls) -> Self:",
         "if __name__ == '__main__':\n    main()",
         "assert isinstance(x, int), f'Expected int, got {type(x)}'",
-        # C / C++
+        "match status_code:\n    case 200: return 'OK'\n    case 404: return 'Not Found'",
+        "result = [x for x in data if x > 0]",
+        "lambda x: x * x + 1",
+        "kwargs = {'key': value, 'another': 42}",
+        "enumerate(items, start=1)",
+        "zip(a, b, c)",
+        "sorted(data, key=lambda x: x.name, reverse=True)",
+        "hasattr(obj, 'method')",
+        "getattr(obj, 'attr', default)",
+        "setattr(obj, 'key', value)",
+        "isinstance(x, (int, float))",
+        "issubclass(Derived, Base)",
+        # ── C / C++ ─────────────────────────────────────────
         "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdint.h>",
-        "#include <stdbool.h>\n#include <math.h>\n#include <pthread.h>",
+        "#include <stdbool.h>\n#include <math.h>\n#include <pthread.h>\n#include <unistd.h>",
+        "#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>",
         "#define MAX(a, b) ((a) > (b) ? (a) : (b))",
         "#define MIN(a, b) ((a) < (b) ? (a) : (b))",
         "#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))",
+        "#define UNUSED(x) (void)(x)",
+        "#define likely(x)   __builtin_expect(!!(x), 1)",
+        "#define unlikely(x) __builtin_expect(!!(x), 0)",
         "typedef struct { int x; int y; float val; } Point;",
-        "typedef enum { OK, ERROR, TIMEOUT } Status;",
+        "typedef enum { OK, ERROR, TIMEOUT, PENDING } Status;",
         "static inline int clamp(int x, int lo, int hi) {",
         "void* malloc(size_t size);\nvoid* calloc(size_t n, size_t s);\nvoid free(void* ptr);",
+        "void* realloc(void* ptr, size_t size);",
+        "int memcmp(const void* a, const void* b, size_t n);",
         "uint64_t hash(const uint8_t* data, size_t len);",
         "for (int i = 0; i < n; i++) {",
+        "while (*p != '\\0') { *p = tolower(*p); p++; }",
         "switch (type) {\n    case INT: return sizeof(int);\n    default: return 0;\n}",
-        # Rust
-        "use std::collections::{HashMap, HashSet, VecDeque};",
-        "use std::sync::{Arc, Mutex, RwLock};",
+        "int pipe(int fd[2]);",
+        "ssize_t read(int fd, void* buf, size_t n);",
+        "ssize_t write(int fd, const void* buf, size_t n);",
+        # ── Rust ─────────────────────────────────────────────
+        "use std::collections::{HashMap, HashSet, VecDeque, BTreeMap, BinaryHeap};",
+        "use std::sync::{Arc, Mutex, RwLock, atomic::{AtomicUsize, Ordering}};",
+        "use std::path::{Path, PathBuf};",
+        "use std::io::{self, Read, Write, BufReader, BufWriter};",
         "use serde::{Serialize, Deserialize};",
-        "use anyhow::{Result, Context, bail, ensure};",
-        "use tokio::net::TcpListener;",
+        "use anyhow::{Result, Context, bail, ensure, anyhow};",
+        "use tokio::net::{TcpListener, TcpStream};",
+        "use tokio::sync::{mpsc, oneshot, broadcast, Semaphore};",
         "pub fn new(config: Config) -> Self {",
         "impl<T: Clone + Send + Sync + 'static> Worker<T> {",
+        "fn process(&mut self, data: &[u8]) -> Result<Vec<u8>> {",
         "#[derive(Debug, Clone, Serialize, Deserialize)]",
+        "#[async_trait]",
         "    .map(|x| x * 2).filter(|x| x > 0).collect::<Vec<_>>()",
         "match result {\n    Ok(val) => val,\n    Err(e) => return Err(e.into()),\n}",
-        # JavaScript / TypeScript
-        "import React, { useState, useEffect, useCallback, useMemo } from 'react';",
+        "if let Some(data) = cache.get(&key) {",
+        "fn main() -> Result<()> {",
+        "println!(\"Hello, {}!\", name);",
+        "eprintln!(\"Error: {}\", err);",
+        "panic!(\"unexpected state: {}\", state);",
+        "todo!(\"implement later\");",
+        "unimplemented!(\"not yet\");",
+        "unreachable!(\"should not happen\");",
+        # ── JavaScript / TypeScript ──────────────────────────
+        "import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';",
+        "import type { FC, PropsWithChildren, ReactNode } from 'react';",
         "import express from 'express';",
         "import { Router, Request, Response, NextFunction } from 'express';",
+        "import cors from 'cors';",
+        "import helmet from 'helmet';",
         "const app = express();",
         "app.use(express.json());",
+        "app.use(cors());",
+        "app.use(helmet());",
         "app.get('/api/users', async (req: Request, res: Response) => {",
         "interface User { id: number; name: string; email: string; }",
         "type Result<T> = { ok: true; data: T } | { ok: false; error: string };",
         "const fn = async (): Promise<void> => {",
         "const result = await fetch('/api/data');",
+        "const json: User[] = await result.json();",
         "console.log(`User: ${user.name}, Age: ${user.age}`);",
-        # Go
-        "package main\nimport (\n    \"context\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n)",
+        "export const App: FC = () => {",
+        "return <div className='container'>{children}</div>;",
+        "try { await doSomething(); } catch (err) { console.error(err); }",
+        "const [state, dispatch] = useReducer(reducer, initialState);",
+        "const ref = useRef<HTMLDivElement>(null);",
+        "const memoized = useMemo(() => compute(a, b), [a, b]);",
+        # ── Go ───────────────────────────────────────────────
+        "package main\nimport (\n    \"context\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"sync\"\n    \"time\"\n)",
         "type Config struct {\n    Host string `json:\"host\" yaml:\"host\"`\n    Port int    `json:\"port\" yaml:\"port\"`\n}",
         "func NewServer(cfg *Config) *Server {",
+        "func (s *Server) Handle(w http.ResponseWriter, r *http.Request) {",
         "ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)",
         "defer cancel()",
-        # SQL / Shell
+        # ── SQL / DB ─────────────────────────────────────────
         "SELECT id, name, email, created_at FROM users WHERE email LIKE '%@example.com' ORDER BY created_at DESC LIMIT 100;",
         "INSERT INTO logs (user_id, action, timestamp) VALUES (?, ?, ?);",
         "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);",
+        "ALTER TABLE users ADD COLUMN updated_at TIMESTAMP DEFAULT NOW();",
+        "BEGIN TRANSACTION;\nCOMMIT;\nROLLBACK;",
+        "SELECT COUNT(*), AVG(score), MAX(score), MIN(score) FROM results GROUP BY category;",
+        "DELETE FROM sessions WHERE expires_at < NOW();",
+        "UPDATE users SET last_login = NOW() WHERE id = ?;",
+        # ── Shell / DevOps ───────────────────────────────────
         "#!/bin/bash\nset -euo pipefail",
         "docker build -t app:latest .",
+        "docker run --rm -p 8080:8080 app:latest",
+        "kubectl apply -f deployment.yaml",
         "git clone https://github.com/user/repo.git && cd repo && make -j$(nproc)",
         "curl -X POST -H \"Content-Type: application/json\" -d '{\"key\":\"val\"}' https://api.example.com",
+        # ── YAML / Config / Markdown ─────────────────────────
+        "version: '3.8'\nservices:\n  app:\n    build: .\n    ports:\n      - \"8080:8080\"\n    environment:\n      - DATABASE_URL=postgres://localhost/mydb",
+        "debug: true\nlog_level: info\nmax_connections: 10\ntimeout_ms: 5000",
+        "# README\n## Installation\n```bash\npip install -r requirements.txt\n```\n## Usage\n```python\nfrom app import main\nmain()\n```",
     ]
 
 def english_samples():
-    """25% — technical English."""
+    """25% — technical + natural English."""
     return [
+        # ── Technical English ────────────────────────────────
         "The transformer architecture uses self-attention mechanisms to process sequential data efficiently.",
         "Gradient descent is an iterative optimization algorithm that finds the minimum of a loss function.",
         "Each attention head projects the input into query, key, and value representations.",
@@ -135,11 +202,39 @@ def english_samples():
         "Early stopping halts training when validation performance stops improving.",
         "Weight decay adds an L2 penalty to the loss function to encourage smaller weights.",
         "The residual connection adds the input directly to the output of a sublayer.",
+        "The attention mechanism computes weighted sums of values based on query-key similarity.",
+        "Multilingual models like BERT and GPT handle dozens of languages simultaneously.",
+        "The compilation process transforms source code into machine-executable binary instructions.",
+        "Memory management in systems programming requires careful handling of allocation and deallocation.",
+        "Concurrent programming with threads and locks introduces challenges like deadlocks and race conditions.",
+        "Functional programming emphasizes immutability, pure functions, and declarative code over imperative style.",
+        "Version control systems like Git track changes to source code and enable collaborative development workflows.",
+        "Continuous integration automates the build, test, and deployment pipeline for software projects.",
+        "The operating system kernel manages hardware resources and provides system call interfaces to applications.",
+        "Database normalization reduces data redundancy and improves integrity through well-defined schema design.",
+        "Network protocols like TCP ensure reliable, ordered delivery of data between applications over IP networks.",
+        "Cryptographic hash functions produce fixed-size digests from arbitrary input with collision resistance.",
+        "Distributed consensus algorithms like Raft and Paxos enable fault-tolerant agreement across nodes.",
+        "Virtual machines and containers provide isolated execution environments for deploying applications.",
+        "Domain-specific languages offer specialized syntax and semantics tailored to particular problem domains.",
+        "Refactoring improves code structure without changing external behavior, enhancing maintainability.",
+        # ── Natural English ───────────────────────────────────
+        "The weather today is sunny with a light breeze blowing through the trees.",
+        "She walked to the store to buy groceries for the dinner party this evening.",
+        "Learning a new programming language takes time and patience but is rewarding.",
+        "The conference featured talks on artificial intelligence, cloud computing, and cybersecurity.",
+        "Please review the documentation before submitting your pull request for approval.",
+        "The project deadline has been extended by two weeks due to additional requirements.",
+        "Could you help me debug this issue? The function returns unexpected results sometimes.",
+        "Thank you for your contribution to the open source community. It is greatly appreciated.",
+        "The tutorial explains step by step how to build a complete web application from scratch.",
+        "I recommend using the latest version because it includes important security patches.",
     ]
 
 def japanese_samples():
-    """15% — technical Japanese."""
+    """15% — technical + natural Japanese."""
     return [
+        # ── Technical Japanese ───────────────────────────────
         "トランスフォーマーアーキテクチャは自己注意機構を用いて系列データを処理します。",
         "深層学習モデルの学習には大規模なデータセットと高性能なGPUが必要です。",
         "Pythonの非同期処理にはasyncioライブラリを使用します。",
@@ -164,6 +259,48 @@ def japanese_samples():
         "ReactはコンポーネントベースのUIライブラリです。",
         "Gitのブランチ戦略としてGitHub FlowやGit Flowがよく使われます。",
         "ロードバランサーはトラフィックを複数のサーバーに分散させます。",
+        "データベースの正規化はデータの冗長性を排除し整合性を保ちます。",
+        "キャッシュ戦略としてLRUやLFUなどのアルゴリズムが利用されます。",
+        "メモリリークは確保したメモリを解放し忘れることで発生する深刻な問題です。",
+        "デザインパターンは再利用可能な設計の雛形として広く認知されています。",
+        "テストコードのカバレッジは品質の指標として用いられますが過信は禁物です。",
+        "リファクタリングは外部の振る舞いを変えずに内部構造を改善する手法です。",
+        "モノレポとポリレポにはそれぞれメリットとデメリットが存在します。",
+        "認証にはセッションベースとトークンベースの二つの主要な方式があります。",
+        "コンパイラはソースコードを解析して最適化された機械語を生成します。",
+        "リンカは複数のオブジェクトファイルを結合して実行可能ファイルを作ります。",
+        "仮想記憶は物理メモリの不足を補うためにディスクをメモリとして使用する技術です。",
+        "並列処理と並行処理は似ていますが異なる概念として区別されています。",
+        "状態管理ライブラリはアプリケーションの複雑な状態を整理するのに役立ちます。",
+        "例外安全なコードを書くためにはRAIIイディオムの理解が不可欠です。",
+        "メタプログラミングを用いるとコードを生成するコードを書くことができます。",
+        "ベンチマークを取ることでパフォーマンスのボトルネックを特定できます。",
+        "シリアライズとデシリアライズはデータの永続化や通信に不可欠な処理です。",
+        "コマンドラインインターフェースは自動化やスクリプト処理に適しています。",
+        "依存関係の解決はパッケージマネージャの重要な役割の一つです。",
+        "単体テストと結合テストを組み合わせて総合的な品質保証を行います。",
+        "ログ出力は障害発生時の原因究明に不可欠な情報を提供します。",
+        "アクセシビリティに配慮したUIデザインはすべてのユーザーにとって重要です。",
+        "データレースは複数のスレッドが同期なしに共有データにアクセスする問題です。",
+        "プリフェッチは将来必要になるデータを事前に読み込んでおく最適化技法です。",
+        "JITコンパイルは実行時により最適なマシンコードを生成する技術です。",
+        "クラウドネイティブな設計では障害を前提とした回復力のあるシステムを構築します。",
+        # ── Natural Japanese ──────────────────────────────────
+        "今日はとても良い天気ですね。散歩に出かけるのにぴったりです。",
+        "先週末は友人と一緒に映画を観に行きました。とても面白かったです。",
+        "毎日の習慣として朝一番にコーヒーを飲むのが楽しみです。",
+        "この新しいプロジェクトに参加できて本当に嬉しく思います。",
+        "来月の発表会に向けて資料の準備を進めております。",
+        "お忙しいところ恐れ入りますが、ご確認いただけますと幸いです。",
+        "不明な点がございましたら、いつでもお気軽にお問い合わせください。",
+        "本日の会議では新機能の仕様について話し合う予定です。",
+        "週末はゆっくり休んで英気を養うことが大切だと思います。",
+        "子供の頃からコンピュータに興味があって、今はソフトウェアエンジニアです。",
+        "料理を作るのが趣味で、特にパスタ料理が得意です。",
+        "旅行が好きで、これまでに二十カ国以上を訪れました。",
+        "運動不足を解消するためにジムに通い始めました。",
+        "読書は新しい知識を得るための最も効率的な方法だと思います。",
+        "音楽を聴きながらコードを書くのが私の集中法です。",
     ]
 
 def digit_samples():
@@ -218,12 +355,12 @@ def create_tokenizer(output_dir="tokenizer"):
     # Corpus: 60% code + 25% en + 15% ja
     print("Building corpus...")
     corpus = []
-    cd = code_samples(); corpus.extend(cd * 60)
-    print(f"  Code: {len(cd)} x60 = {len(cd)*60}")
-    en = english_samples(); corpus.extend(en * 50)
-    print(f"  EN:   {len(en)} x50 = {len(en)*50}")
-    jp = japanese_samples(); corpus.extend(jp * 30)
-    print(f"  JP:   {len(jp)} x30 = {len(jp)*30}")
+    cd = code_samples(); corpus.extend(cd * 80)
+    print(f"  Code: {len(cd)} x80 = {len(cd)*80}")
+    en = english_samples(); corpus.extend(en * 60)
+    print(f"  EN:   {len(en)} x60 = {len(en)*60}")
+    jp = japanese_samples(); corpus.extend(jp * 50)
+    print(f"  JP:   {len(jp)} x50 = {len(jp)*50}")
     dg = digit_samples(); corpus.extend(dg * 20)
     print(f"  Num:  {len(dg)} x20 = {len(dg)*20}")
     print(f"  Total lines: ~{len(corpus)}")
