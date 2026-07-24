@@ -238,14 +238,14 @@ See [`TINYLLM_TRAIN_BENCHMARK.ipynb`](TINYLLM_TRAIN_BENCHMARK.ipynb) for the com
 
 ### 🌟 Trained a model? Share it with the world!
 
-**👉 https://huggingface.co/RyoOtani/tinyllm-weights-community**
+**👉 https://huggingface.co/Ryo3desu/tinyllm-models**
 
 This is the **official community repository** for community-trained TinyLLM models.  
 Upload your `.gguf` or full weights and get **credited in the model card**!
 
 ```bash
 huggingface-cli login
-huggingface-cli upload RyoOtani/tinyllm-weights-community your-model.gguf tinyllm-small/your-name/
+huggingface-cli upload Ryo3desu/tinyllm-models your-model.gguf tinyllm-small/your-name/
 ```
 
 ### 📋 How to contribute
@@ -268,7 +268,7 @@ huggingface-cli upload RyoOtani/tinyllm-weights-community your-model.gguf tinyll
 
 | Method | How | Link |
 |--------|-----|------|
-| 🤗 **Hugging Face** | Upload to community repo | [RyoOtani/tinyllm-weights-community](https://huggingface.co/RyoOtani/tinyllm-weights-community) |
+| 🤗 **Hugging Face** | Upload to community repo | [Ryo3desu/tinyllm-models](https://huggingface.co/Ryo3desu/tinyllm-models) |
 | 📦 **Git LFS** | Direct PR to this repo | [Submit PR](https://github.com/RyoOtani/DS4SmallestAIprjct/pulls) |
 | ☁️ **Cloud storage** | GD/Dropbox → post link | [Open Issue](https://github.com/RyoOtani/DS4SmallestAIprjct/issues) |
 

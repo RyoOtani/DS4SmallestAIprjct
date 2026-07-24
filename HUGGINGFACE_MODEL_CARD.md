@@ -349,7 +349,7 @@ See [QUICKSTART_TRAIN.md](https://github.com/RyoOtani/DS4SmallestAIprjct/blob/ma
 ### 🌟 Community Model Collection
 
 > **If you trained the model, please upload it to our community repository!**  
-> 👉 **[https://huggingface.co/RyoOtani/tinyllm-weights-community](https://huggingface.co/RyoOtani/tinyllm-weights-community)**
+> 👉 **[https://huggingface.co/Ryo3desu/tinyllm-models](https://huggingface.co/Ryo3desu/tinyllm-models)**
 
 This is the official collection for community-trained TinyLLM models.  
 Every contributor gets **credited in the model card** with their name and GPU hardware!
@@ -357,7 +357,7 @@ Every contributor gets **credited in the model card** with their name and GPU ha
 ```bash
 # Upload your trained model to the community hub
 huggingface-cli login
-huggingface-cli upload RyoOtani/tinyllm-weights-community your-model.gguf tinyllm-small/your-name/
+huggingface-cli upload Ryo3desu/tinyllm-models your-model.gguf tinyllm-small/your-name/
 ```
 
 **What to contribute:**
@@ -370,7 +370,7 @@ huggingface-cli upload RyoOtani/tinyllm-weights-community your-model.gguf tinyll
 
 - 📖 **GitHub**: [github.com/RyoOtani/DS4SmallestAIprjct](https://github.com/RyoOtani/DS4SmallestAIprjct)
 - 🤗 **Hugging Face Models**: [huggingface.co/RyoOtani/tinyllm](https://huggingface.co/RyoOtani/tinyllm)
-- 🤝 **Community Weights**: [huggingface.co/RyoOtani/tinyllm-weights-community](https://huggingface.co/RyoOtani/tinyllm-weights-community)
+- 🤝 **Community Weights**: [huggingface.co/Ryo3desu/tinyllm-models](https://huggingface.co/Ryo3desu/tinyllm-models)
 - 📄 **Architecture**: [ARCHITECTURE.md](https://github.com/RyoOtani/DS4SmallestAIprjct/blob/main/ARCHITECTURE.md)
 - 🗺️ **Project Plan**: [PROJECT_PLAN.md](https://github.com/RyoOtani/DS4SmallestAIprjct/blob/main/PROJECT_PLAN.md)
 - 🔮 **Vision**: [VISION.md](https://github.com/RyoOtani/DS4SmallestAIprjct/blob/main/VISION.md)
