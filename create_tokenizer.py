@@ -270,7 +270,12 @@ def create_tokenizer(output_dir="tokenizer"):
 
 
 def test_tokenizer(output_dir="tokenizer"):
-    from transformers import AutoTokenizer
+    """Test tokenizer quality. Requires: pip install transformers"""
+    try:
+        from transformers import AutoTokenizer
+    except ImportError:
+        print("transformers not installed. Run: pip install transformers")
+        return
     tok = AutoTokenizer.from_pretrained(output_dir, use_fast=True)
     tests = [
         ("Python", "def quick_sort(arr):\n    if len(arr) <= 1:\n        return arr\n    pivot = arr[len(arr) // 2]\n    left = [x for x in arr if x < pivot]\n    return quick_sort(left) + [pivot] + quick_sort([x for x in arr if x > pivot])"),
