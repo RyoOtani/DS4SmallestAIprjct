@@ -1,0 +1,111 @@
+{"text": "Explain the concept of polymorphism in object-oriented programming with examples in Python and C++."}
+{"text": "Describe the difference between TCP and UDP protocols and when to use each one for networked applications."}
+{"text": "Explain how a garbage collector works in languages like Java and Go. Compare mark-sweep with reference counting."}
+{"text": "What is the difference between process and thread? Explain the context switching overhead for each."}
+{"text": "Describe the CAP theorem in distributed systems. How do different databases make tradeoffs between consistency and availability?"}
+{"text": "Explain how a transformer neural network works, including self-attention, multi-head attention, and feed-forward layers."}
+{"text": "What is the difference between REST and GraphQL APIs? When would you choose one over the other?"}
+{"text": "Explain the concept of dependency injection and its benefits for testable software architecture."}
+{"text": "Describe the OSI model layers and how each layer contributes to network communication."}
+{"text": "Explain the concept of eventual consistency in distributed databases with practical examples like DynamoDB."}
+{"text": "What is a race condition? Explain how mutexes, semaphores, and lock-free data structures prevent them."}
+{"text": "Describe the difference between symmetric and asymmetric encryption. When would you use each?"}
+{"text": "Explain the concept of a blockchain and how proof-of-work consensus maintains distributed ledger integrity."}
+{"text": "What is the difference between a compiler and an interpreter? Explain the JIT compilation approach."}
+{"text": "Describe how virtual memory works in modern operating systems, including page tables and TLB misses."}
+{"text": "Explain the concept of functional programming. Compare pure functions, immutability, and side effects with OOP."}
+{"text": "Describe the ACID properties of database transactions and how they ensure data integrity."}
+{"text": "What is a deadlock? Explain the four necessary conditions and how to prevent them in concurrent systems."}
+{"text": "Explain the concept of MapReduce and how it enables distributed processing of large datasets."}
+{"text": "Describe how a CDN works and how it improves global content delivery latency."}
+{"text": "Explain the difference between supervised, unsupervised, and reinforcement learning with examples."}
+{"text": "What is the Single Responsibility Principle? Provide a code example showing violation and correct implementation."}
+{"text": "Describe how OAuth 2.0 authorization flow works with authorization code grant type."}
+{"text": "Explain the concept of eventual consistency and how CRDTs (Conflict-free Replicated Data Types) solve conflicts."}
+{"text": "What is the difference between HTTP/1.1, HTTP/2, and HTTP/3? Explain multiplexing and server push."}
+{"text": "Describe how a neural network learns through backpropagation and gradient descent."}
+{"text": "Explain the concept of sharding in databases. Compare horizontal vs vertical sharding strategies."}
+{"text": "What is the difference between authorization and authentication? Provide examples of each."}
+{"text": "Describe the microservices architecture pattern and its tradeoffs compared to monolithic applications."}
+{"text": "Explain how DNS resolution works from browser to authoritative name server."}
+{"text": "What is the difference between SQL and NoSQL databases? When should you choose each type?"}
+{"text": "Describe the concept of test-driven development (TDD) with the red-green-refactor cycle."}
+{"text": "Explain how TLS/SSL handshake establishes a secure connection between client and server."}
+{"text": "What is the difference between a mutation and an idempotent operation in RESTful APIs?"}
+{"text": "Describe how a load balancer distributes traffic across multiple servers. Compare round-robin vs least connections."}
+{"text": "Explain the concept of type erasure in Java generics and how it differs from C++ templates."}
+{"text": "What is the difference between stack and heap memory allocation? Explain memory fragmentation."}
+{"text": "Describe the iterator pattern and how it provides a uniform way to traverse different data structures."}
+{"text": "Explain how a database index works internally using B-tree data structures."}
+{"text": "What is the difference between a cookie, a session, and a JWT token for web authentication?"}
+{"text": "Describe the concept of serverless computing and its advantages for event-driven architectures."}
+{"text": "Explain how Docker containers differ from virtual machines in terms of resource isolation and overhead."}
+{"text": "What is a man-in-the-middle attack? How does HTTPS protect against it?"}
+{"text": "Describe the concept of idempotency in distributed systems and why it matters for API design."}
+{"text": "Explain the difference between breadth-first search and depth-first search in graph traversal."}
+{"text": "What is a CDN and how does it determine which edge server should serve a particular user's request?"}
+{"text": "Describe the concept of eventual consistency in the context of Amazon DynamoDB's design."}
+{"text": "Explain how a quantum computer differs from a classical computer in terms of qubits and superposition."}
+{"text": "What is the difference between white-box and black-box testing? When is each approach appropriate?"}
+{"text": "Describe the concept of a content delivery network and how it improves website performance globally."}
+{"text": "Explain the difference between imperative and declarative programming with concrete code examples."}
+{"text": "What is a DDoS attack? Describe mitigation strategies including rate limiting and CDN scrubbing."}
+{"text": "Describe how the Kafka message broker guarantees message ordering within a partition."}
+{"text": "Explain the concept of a circuit breaker pattern in microservices and how it prevents cascading failures."}
+{"text": "What is the difference between optimistic and pessimistic locking in concurrent database access?"}
+{"text": "Describe the concept of data normalization in relational databases and its three normal forms."}
+{"text": "Explain how a search engine indexes web pages and ranks them using algorithms like PageRank."}
+{"text": "What is the difference between TCP flow control and congestion control? Explain how each works."}
+{"text": "Describe the Strategy pattern and provide a real-world example of when to use it."}
+{"text": "Explain the concept of eventual consistency and how Amazon DynamoDB implements it."}
+{"text": "What is the difference between a library and a framework? Provide examples of each."}
+{"text": "Describe how a neural network's attention mechanism allows it to focus on relevant parts of input."}
+{"text": "Explain the concept of idempotency keys in payment APIs to prevent duplicate charges."}
+{"text": "What is the difference between synchronous and asynchronous replication in databases?"}
+{"text": "Describe the concept of zero-trust security model and how it differs from perimeter-based security."}
+{"text": "Explain how the WebSocket protocol enables real-time bidirectional communication over a single TCP connection."}
+{"text": "What is the difference between horizontal and vertical scaling in cloud computing?"}
+{"text": "Describe the concept of eventual consistency and how it differs from strong consistency in distributed databases."}
+{"text": "Explain the difference between a JOIN and a subquery in SQL. When would you use each?"}
+{"text": "What is the Observer pattern? Provide a TypeScript implementation example."}
+{"text": "Describe how a Bloom filter works and its space efficiency compared to a hash set."}
+{"text": "Explain the concept of a write-ahead log (WAL) in database systems and its role in crash recovery."}
+{"text": "What is the difference between a managed and unmanaged pointer in languages like C# and Rust?"}
+{"text": "Describe the concept of a service mesh and how it handles service-to-service communication."}
+{"text": "Explain how rate limiting works using the token bucket algorithm."}
+{"text": "What is the difference between a snapshot and a backup? Explain recovery point objectives."}
+{"text": "Describe the concept of eventual consistency and how Cassandra's tunable consistency works."}
+{"text": "Explain the difference between a stateful and stateless application with deployment implications."}
+{"text": "What is the Repository pattern and how does it abstract data access in domain-driven design?"}
+{"text": "Describe how the fork-join pattern enables parallel computation in Java's ForkJoinPool."}
+{"text": "Explain the concept of a connection pool and how it improves database performance."}
+{"text": "What is the difference between a memory leak and a stack overflow? How does each occur?"}
+{"text": "Describe the concept of blue-green deployment and how it enables zero-downtime releases."}
+{"text": "Explain how a Merkle tree enables efficient verification of data integrity in distributed systems."}
+{"text": "What is the difference between synchronous and asynchronous communication in microservices?"}
+{"text": "Describe the concept of a distributed transaction and the two-phase commit protocol."}
+{"text": "Explain the difference between a deep copy and a shallow copy with examples in Python."}
+{"text": "What is the Factory pattern? Provide a Python example that creates different database connections."}
+{"text": "Describe how a RAID storage system provides redundancy and improves performance."}
+{"text": "Explain the concept of cache invalidation and common strategies like TTL and LRU."}
+{"text": "What is the difference between a mutex and a semaphore in concurrent programming?"}
+{"text": "Describe the concept of a reverse proxy and how it differs from a forward proxy."}
+{"text": "Explain the difference between NAT and PAT in network address translation."}
+{"text": "What is the Builder pattern? Provide a Java example for constructing complex objects."}
+{"text": "Describe how a distributed hash table (DHT) enables peer-to-peer networks like BitTorrent."}
+{"text": "Explain the concept of checkpointing in distributed stream processing systems like Apache Flink."}
+{"text": "What is the difference between a prepared statement and a regular SQL query? Explain SQL injection prevention."}
+{"text": "Describe the concept of operation idempotency in REST APIs and how to implement it safely."}
+{"text": "Explain the difference between SOAP and REST web services with their respective use cases."}
+{"text": "What is the Prototype pattern? Provide a JavaScript example using Object.create for cloning."}
+{"text": "Describe the concept of a gossip protocol and how it enables eventual consistency in distributed systems."}
+{"text": "Explain the difference between a demand page and an anticipatory page in virtual memory systems."}
+{"text": "What is the Adapter pattern? Provide a C++ example that adapts a legacy interface to a modern one."}
+{"text": "Describe how a consistent hash ring distributes data across nodes in a distributed cache like Memcached."}
+{"text": "Explain the concept of time-to-live (TTL) in DNS caching and how it affects domain propagation."}
+{"text": "What is the difference between a binary tree and a B-tree? Explain their typical use cases."}
+{"text": "Describe the concept of a sidecar pattern in service mesh architectures like Istio."}
+{"text": "Explain the difference between optimistic and pessimistic concurrency control in database systems."}
+{"text": "What is the Facade pattern? Provide a Python example that simplifies a complex subsystem."}
+{"text": "Describe how the Paxos consensus algorithm achieves agreement in distributed systems."}
+{"text": "Explain the concept of a two-phase commit in distributed transactions and its failure modes."}

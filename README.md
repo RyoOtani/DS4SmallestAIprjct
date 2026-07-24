@@ -296,6 +296,31 @@ TinyLLM uses a **BPE tokenizer with 65,536 vocabulary**, compatible with Hugging
 - **Web + Code**: [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) — 15T tokens of web data
 - **Pre-tokenized format**: Raw `.bin` files (int32 token IDs) or `.jsonl` with `{"tokens": [...]}`
 
+### 蒸留用データ (Distillation Data)
+
+別リポジトリで管理しています：
+
+> **🤗 [DS4SmallestAIprjctDistilldata-DeepSeek-v4Flash-Pro-](https://github.com/RyoOtani/DS4SmallestAIprjctDistilldata-DeepSeek-v4Flash-Pro-)**
+
+| File | Samples | Description |
+|------|---------|-------------|
+| `sample_code_distill.jsonl` | 200 | コード生成タスク (Python/C/Rust/Go/JS/TS) |
+| `sample_instruction_distill.jsonl` | 100 | 技術概念の説明タスク |
+| `sample_fim_distill.jsonl` | 61 | Fill-in-the-Middle コード補完 |
+| `generate_large_dataset.py` | — | 50,000+ サンプル生成スクリプト |
+
+```bash
+# カスタムデータ生成 (DeepSeek API 不要)
+python data/distillation/generate_large_dataset.py --output my_data.jsonl --n 1000
+
+# 本番蒸留
+python python/train/distill.py \
+  --teacher deepseek-ai/DeepSeek-V3 \
+  --student Qwen/Qwen3-5-9B \
+  --data data/distillation/sample_code_distill.jsonl \
+  --output output/distilled_model
+```
+
 ```python
 # Pre-tokenization example
 from transformers import AutoTokenizer
