@@ -217,48 +217,125 @@ TinyLLM の**ソフトウェアは完成**しています。コードはすべ�
 
 ### あなたが GPU を持っているなら
 
-もしあなたが A100/H100 クラスタや豊富なクラウドクレジットを持っているなら、
-**モデルを訓練して、GGUF ファイルをコミュニティに共有してください**。
+## 🚀 1-Click Training Benchmark
+
+> **Open in Colab or RunPod → Run all cells → Get a trained model in hours**
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/RyoOtani/DS4SmallestAIprjct/blob/main/TINYLLM_TRAIN_BENCHMARK.ipynb)
+[![RunPod](https://img.shields.io/badge/RunPod-1--click-blue)](https://runpod.io/console/deploy?template=)
+[![Kaggle](https://img.shields.io/badge/Kaggle-Notebook-blue)](https://kaggle.com/)
 
 ```bash
-# 1. モデル訓練 (あなたの GPU で)
-torchrun --nproc_per_node=8 -m agent.phase7.cli train --config medium --data /your/dataset
-
-# 2. GGUF エクスポート
-python3 -c "
-from model import create_model, export_model_to_gguf
-model = create_model('medium')  # 訓練済みモデルをロード
-export_model_to_gguf(model, 'tinyllm-medium.gguf', {...})
-"
-
-# 3. 共有 (Git LFS / Hugging Face / 直接 PR)
-git lfs track "*.gguf"
-git add tinyllm-medium.gguf
-git commit -m "Add trained tinyllm-medium GGUF"
-git push
+# Just run the notebook! No setup needed.
+# Generates dummy data → Creates model → Trains → Exports GGUF
 ```
 
-### 欲しいモデル
+See [`TINYLLM_TRAIN_BENCHMARK.ipynb`](TINYLLM_TRAIN_BENCHMARK.ipynb) for the complete workflow.
 
-| 優先度 | モデル | 活性化パラメータ | 必要 GPU | 用途 |
-|--------|--------|----------------|---------|------|
-| 🔴 最優先 | `small` | 3.0B | A100×4, 1週間 | 個人 PC で快適動作 |
-| 🟠 高 | `medium` | 14.5B | A100×8, 2週間 | 本格ローカル開発 |
-| 🟡 中 | `xlarge` | 43.9B | H100×16, 3週間 | プロフェッショナル用途 |
-| 🟢 低 | `mega` / `giga` | 178B+ | H100×64, 4週間 | 研究・頂点性能 |
+---
 
-### 共有方法
+## 🤝 Community & Contribution
 
-- 📦 **Git LFS**: このリポジトリに直接 PR (100MB 以下の量子化モデル)
-- 🤗 **Hugging Face**: `RyoOtani/tinyllm-models` にアップロード → Issue でお知らせください
-- ☁️ **任意のストレージ**: Google Drive, Dropbox 等 → Issue でリンクを共有
+### 🌟 Trained a model? Share it with the world!
 
-### 訓練データについて
+**👉 https://huggingface.co/RyoOtani/tinyllm-weights-community**
 
-コード・対話データも同時に募集中です。良いデータがあれば良いモデルが生まれます。
+This is the **official community repository** for community-trained TinyLLM models.  
+Upload your `.gguf` or full weights and get **credited in the model card**!
+
+```bash
+huggingface-cli login
+huggingface-cli upload RyoOtani/tinyllm-weights-community your-model.gguf tinyllm-small/your-name/
+```
+
+### 📋 How to contribute
+
+1. **Train** — Use `TINYLLM_TRAIN_BENCHMARK.ipynb` on your GPU hardware
+2. **Export** — Convert to GGUF format (Q4_0 recommended for sharing)
+3. **Upload** — Push to our HF community repo or submit a GitHub PR
+4. **Get credited** — Your name goes in the contributors hall of fame!
+
+### 🎯 Priority Models
+
+| Priority | Model | Active Params | GPU Required | Why |
+|----------|-------|--------------|-------------|-----|
+| 🔴 Highest | `small` | **3.0B** | A100×4, 1 week | Runs on any PC |
+| 🟠 High | `medium` | 14.5B | A100×8, 2 weeks | Pro local dev |
+| 🟡 Medium | `xlarge` | 43.9B | H100×16, 3 weeks | Professional |
+| 🟢 Low | `mega` / `giga` | 178B+ | H100×64, 4 weeks | Research |
+
+### 📦 Share Methods
+
+| Method | How | Link |
+|--------|-----|------|
+| 🤗 **Hugging Face** | Upload to community repo | [RyoOtani/tinyllm-weights-community](https://huggingface.co/RyoOtani/tinyllm-weights-community) |
+| 📦 **Git LFS** | Direct PR to this repo | [Submit PR](https://github.com/RyoOtani/DS4SmallestAIprjct/pulls) |
+| ☁️ **Cloud storage** | GD/Dropbox → post link | [Open Issue](https://github.com/RyoOtani/DS4SmallestAIprjct/issues) |
+
+---
+
+## 📚 Tokenizer & Dataset Specification
+
+### Tokenizer
+
+TinyLLM uses a **BPE tokenizer with 65,536 vocabulary**, compatible with HuggingFace:
+
+| Property | Value |
+|----------|-------|
+| Type | BPE (Byte-Pair Encoding) |
+| Vocab size | 65,536 |
+| Special tokens | `<s>`=0, `</s>`=1, `<pad>`=2, `<unk>`=3, FIM tokens |
+| Source | [Qwen/Qwen2.5-1.5B](https://huggingface.co/Qwen/Qwen2.5-1.5B) (compatible) |
+| Load with | `AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B")` |
+| Add tokens | `<fim_prefix>`, `<fim_suffix>`, `<fim_middle>`, `<tool_call>`, `</tool_call>` |
+
+### Recommended Training Data
+
+- **Primary**: [The Stack v2](https://huggingface.co/datasets/bigcode/the-stack-v2) — 900+ programming languages, 67TB
+- **Code subset**: Python, C, C++, Rust, Go, JavaScript, TypeScript
+- **Web + Code**: [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) — 15T tokens of web data
+- **Pre-tokenized format**: Raw `.bin` files (int32 token IDs) or `.jsonl` with `{"tokens": [...]}`
+
+```python
+# Pre-tokenization example
+from transformers import AutoTokenizer
+tok = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B")
+tokens = tok.encode("Your training text here")
+tokens.astype('int32').tofile('data/train.bin')
+```
+
+> **データも募集中！** 質の高いコード・対話データをお持ちでしたら、ぜひ共有してください。
+
+---
+
+## 🧪 Training your own model
+
+```bash
+# 1. Quick start (1-click)
+#    → Open TINYLLM_TRAIN_BENCHMARK.ipynb in Colab
+
+# 2. Single GPU
+python3 -m agent.phase7.cli train \
+  --config nano --data data/train.bin --batch-size 2 --max-steps 100000
+
+# 3. Multi GPU
+torchrun --nproc_per_node=8 -m agent.phase7.cli train \
+  --config small --data data/train.bin --batch-size 2 --grad-accum 4 \
+  --lr 2e-4 --max-steps 200000 --output-dir checkpoints
+
+# 4. Export to GGUF
+python3 -c "
+from model.export.gguf_exporter import export_model_to_gguf
+export_model_to_gguf(model, 'tinyllm-small-q4.gguf', config_dict, use_q4_0=True)
+"
+
+# 5. Run with C runtime
+./tinyllm run tinyllm-small-q4.gguf
+```
 
 > **「コードは書いた。あとは世界の GPU パワーでモデルを生み出すだけ。」**
+> **"I wrote the code. Now we just need the world's GPU power to train the models."**
 
-## ライセンス
+## License
 
-MIT License — 自由に使って、改良して、世界を変えてください。
+MIT License — Free to use, modify, and share.
