@@ -21,8 +21,13 @@ endif
 # Platform-specific
 UNAME_S  := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-	CFLAGS += -DTL_HAS_ACCELERATE=1 -DTL_HAS_METAL=1
-	LDFLAGS += -framework Accelerate -framework Metal -framework Foundation
+	CFLAGS += -DTL_HAS_ACCELERATE=1
+	LDFLAGS += -framework Accelerate
+	# Metal backend (optional, requires Xcode)
+	ifdef METAL_ENABLED
+	CFLAGS += -DTL_HAS_METAL=1
+	LDFLAGS += -framework Metal -framework Foundation
+	endif
 	# Check for Apple Silicon native NEON
 	ARCH := $(shell uname -m)
 	ifeq ($(ARCH),arm64)
@@ -48,8 +53,8 @@ CFLAGS += -march=armv8-a+simd
 $(info ✓ NEON detected)
 endif
 
-SRCS := $(wildcard src/*.c)
-OBJS := $(SRCS:.c=.o)
+SRCS_C := $(wildcard src/*.c)
+OBJS   := $(SRCS_C:.c=.o)
 TARGET := tinyllm
 
 .PHONY: all clean test install format check
@@ -60,18 +65,26 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "✓ Built $(TARGET) ($(shell du -sh $(TARGET) | cut -f1))"
 
-# ── Metal shader compilation (macOS only) ─────────────────────────────────
+%.o: %.c include/*.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# ── Metal backend (experimental, macOS only) ────────────────────────────
+# To enable: uncomment METAL_ENABLED=1 below
+# Requirements: Xcode Command Line Tools, Objective-C ARC runtime
+# METAL_ENABLED := 1
+ifdef METAL_ENABLED
+OBJS += src/metal.o
+SRCS_M := $(wildcard src/*.m)
+
+src/metal.o: src/metal.m include/*.h
+	$(CC) $(CFLAGS) -x objective-c -fobjc-arc -c -o $@ $<
+
 METALLIB := tinyllm.metallib
-ifeq ($(UNAME_S),Darwin)
 $(METALLIB): src/tinyllm_ops.metal
 	xcrun -sdk macosx metal -O3 -ffast-math -o $@ $<
 	@echo "✓ Metal library compiled ($(shell du -sh $@ | cut -f1))"
-
 all: $(METALLIB)
 endif
-
-%.o: %.c include/*.h
-	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Debug build (ASAN)
 debug: CFLAGS = -std=c11 -g -O0 -fsanitize=address -fno-omit-frame-pointer

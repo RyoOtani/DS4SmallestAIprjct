@@ -1,22 +1,15 @@
 /*
  * tinyllm — Metal GPU backend for Apple Silicon (M1/M2/M3/M4).
  *
- * Provides GPU-accelerated versions of:
- *   - Matrix multiply (FP32 + Q4_0 dequant fused)
- *   - RMS normalization
- *   - SwiGLU / GELU / SiLU activations
- *   - Rotary position embedding
- *   - Softmax
- *   - MoE top-k routing
- *   - Flash attention
- *
- * Auto-fallback to CPU (NEON/Accelerate) if Metal is unavailable.
- * Zero-config: tl_metal_init() auto-detects and initializes.
+ * Provides GPU-accelerated matrix multiplication and neural network ops
+ * via Apple's Metal Performance Shaders.
  *
  * Compilation:
- *   Metal shaders are compiled at build time via Makefile:
- *     xcrun -sdk macosx metal -O3 tinyllm_ops.metal -o tinyllm.metallib
- *   The .metallib is embedded or loaded at runtime.
+ *   make METAL_ENABLED=1         # enables Metal backend
+ *   make METAL_ENABLED=1 clean   # clean + rebuild with Metal
+ *
+ * This file is only compiled when METAL_ENABLED=1 is set.
+ * See Makefile for details.
  */
 
 #include "tinyllm.h"
@@ -25,7 +18,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) && defined(TL_HAS_METAL)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
@@ -432,6 +425,12 @@ int tl_metal_gelu(const float *x, float *y, int n) { return 0; }
 int tl_metal_silu(const float *x, float *y, int n) { return 0; }
 
 #endif /* TARGET_OS_OSX */
+#endif /* TL_HAS_METAL (real Metal implementation) */
+
+/* ═══════════════════════════════════════════════════════════════
+   Fallback stubs — compiled on all platforms.
+   Return 0 (not available) so callers gracefully fall back to CPU.
+   ═══════════════════════════════════════════════════════════════ */
 
 #else  /* !__APPLE__ — non-Apple platforms: stub */
 
@@ -449,5 +448,3 @@ int tl_metal_moe_topk(const float *gate_logits, int *expert_indices, float *expe
 int tl_metal_flash_attention(const float *Q, const float *K, const float *V, float *O, int seq_len, int n_heads, int head_dim, float scale) { return 0; }
 int tl_metal_gelu(const float *x, float *y, int n) { return 0; }
 int tl_metal_silu(const float *x, float *y, int n) { return 0; }
-
-#endif /* __APPLE__ */
