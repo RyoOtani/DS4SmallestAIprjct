@@ -7,9 +7,19 @@
     "<fim_prefix>",
     "<fim_suffix>",
     "<fim_middle>",
+    "<fim_hole>",
+    "<fim_pad>",
+    "<repo_name>",
+    "<file_sep>",
+    "<file_path>",
     "<tool_call>",
     "</tool_call>",
+    "<tool_response>",
+    "</tool_response>",
     "<scratchpad>",
-    "</scratchpad>"
+    "</scratchpad>",
+    "<|system|>",
+    "<|user|>",
+    "<|assistant|>"
   ]
 }
