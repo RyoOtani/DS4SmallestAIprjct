@@ -149,47 +149,70 @@ def create_tokenizer(output_dir="tokenizer"):
 
 
 def generate_training_corpus():
-    """Generate training data for the BPE tokenizer."""
-    languages = ['python', 'c', 'javascript', 'rust', 'go', 'typescript']
+    """Generate bilingual (EN + JP) training data for the BPE tokenizer."""
 
     samples = [
-        # Python
+        # ── English code ──────────────────────────────────────
         "def quicksort(arr):\n    if len(arr) <= 1: return arr\n    pivot = arr[len(arr)//2]",
         "class Node:\n    def __init__(self, val):\n        self.val = val\n        self.left = None",
         "import asyncio\nasync def fetch(url):\n    async with aiohttp.ClientSession() as s:",
-        "@dataclass\nclass Config:\n    learning_rate: float = 1e-4\n    batch_size: int = 32",
-        "try:\n    result = await process(data)\nexcept ValueError as e:\n    log.error(e)",
-
-        # C/C++
         "#include <stdio.h>\nint main() {\n    printf(\"Hello, World!\\n\");\n    return 0;\n}",
-        "struct Node { int data; struct Node* next; };\nvoid insert(struct Node** head, int val) {",
-        "#include <vector>\nstd::vector<int> v = {1, 2, 3, 4, 5};\nstd::sort(v.begin(), v.end());",
-        "void* malloc(size_t size);\nvoid free(void* ptr);\n#define MAX(a,b) ((a)>(b)?(a):(b))",
-
-        # JavaScript/TypeScript
         "function fibonacci(n) { if (n <= 1) return n; return fibonacci(n-1) + fibonacci(n-2); }",
-        "const result = [1, 2, 3, 4, 5].filter(x => x % 2 === 0).map(x => x * x);",
-        "class EventEmitter { constructor() { this.events = {}; } on(event, fn) {",
-        "interface User { id: number; name: string; email: string; }",
-        "async function fetchData<T>(url: string): Promise<T> { const res = await fetch(url);",
-
-        # Rust
         "fn main() { let v = vec![1, 2, 3]; for x in &v { println!(\"{}\", x); } }",
-        "impl<T: Clone + Ord> BinaryHeap<T> { fn new() -> Self { Self { data: Vec::new() } } }",
-        "#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct Config { pub port: u16 }",
-
-        # Go
         "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"Hello\"); }",
-        "type User struct { Name string `json:\"name\"`; Age int `json:\"age\"` }",
-        "func (s *Server) HandleRequest(w http.ResponseWriter, r *http.Request) {",
+        "interface User { id: number; name: string; email: string; }",
 
-        # General text
+        # ── English general ────────────────────────────────────
         "The transformer architecture uses self-attention to process sequences.",
         "Gradient descent is an optimization algorithm that minimizes the loss function.",
         "A binary search tree maintains the invariant that left < root < right.",
         "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"status\": \"ok\"}",
         "git commit -m \"Add feature\" && git push origin main",
         "SELECT * FROM users WHERE email LIKE '%@example.com' ORDER BY created_at DESC",
+
+        # ── 日本語コード・技術文書 ────────────────────────────
+        "def 線形探索(配列, 目標値):\n    for i, 値 in enumerate(配列):\n        if 値 == 目標値:\n            return i\n    return -1",
+        "class 顧客管理:\n    def __init__(self, 名前, メール):\n        self.名前 = 名前\n        self.メール = メール",
+        "import requests\nresponse = requests.get('https://api.example.com/データ')\nprint(response.json())",
+        "#include <stdio.h>\nint main() {\n    printf(\"こんにちは世界\\n\");\n    return 0;\n}",
+
+        # ── 日本語一般文書 ────────────────────────────────────
+        "トランスフォーマーアーキテクチャは自己注意機構を用いて系列データを処理します。",
+        "深層学習モデルの学習には大規模なデータセットと計算資源が必要です。",
+        "このプロジェクトは個人のPCで動作する省メモリなAIアシスタントを目指しています。",
+        "関数型プログラミングは副作用のない純粋関数を組み合わせてプログラムを構築します。",
+        "データベースのインデックスはB-tree構造を用いて高速な検索を実現します。",
+        "マイクロサービスアーキテクチャでは各サービスが独立してデプロイ可能です。",
+        "セキュリティ対策として入力値のバリデーションとサニタイズが重要です。",
+        "GitHubでプルリクエストを作成してコードレビューを依頼してください。",
+        "エラーハンドリングにはtry-except文を使用して適切に例外を捕捉します。",
+        "分散システムではCAP定理に基づいて一貫性と可用性のトレードオフを考慮します。",
+        "テスト駆動開発では最初にテストを書いてから実装を行います。",
+        "コンテナ技術を使うことで環境に依存しないアプリケーションの実行が可能です。",
+        "機械学習モデルの評価には適合率と再現率のバランスが重要です。",
+        "オブジェクト指向設計では単一責任の原則に従ってクラスを分割します。",
+        "並行処理ではミューテックスやセマフォを使って排他制御を行います。",
+
+        # ── 日本語コードコメント・ドキュメント ────────────────
+        "# この関数は二分探索を実装しています\n# 計算量はO(log n)です\ndef binary_search(arr, target):\n    left, right = 0, len(arr) - 1\n    while left <= right:\n        mid = (left + right) // 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            left = mid + 1\n        else:\n            right = mid - 1\n    return -1",
+        "// ユーザー認証を行うミドルウェア\n// JWTトークンを検証してリクエストを処理します\nfunction authMiddleware(req, res, next) {\n    const token = req.headers.authorization;\n    if (!token) return res.status(401).json({ error: '認証が必要です' });\n    try {\n        const decoded = jwt.verify(token, process.env.JWT_SECRET);\n        req.user = decoded;\n        next();\n    } catch (err) {\n        return res.status(403).json({ error: 'トークンが無効です' });\n    }\n}",
+        "<!-- ユーザープロフィール画面 -->\n<div class=\"profile\">\n    <h1>プロフィール</h1>\n    <p>名前: {{ user.name }}</p>\n    <p>メール: {{ user.email }}</p>\n</div>",
+        "# 設定ファイル\n# データベース接続情報\ndatabase:\n  host: localhost\n  port: 5432\n  name: myapp\n  user: admin",
+
+        # ── 日本語技術ブログ・ドキュメント調 ──────────────────
+        "この記事ではPythonでの非同期処理の実装方法について解説します。asyncioライブラリを使用することで、I/O待ちの間に他の処理を実行できます。",
+        "Rustの所有権システムはメモリ安全性をコンパイル時に保証する革新的な仕組みです。 borrow checkerが参照のライフタイムを追跡します。",
+        "Dockerを使用することで開発環境の構築が大幅に簡略化されます。 Dockerfileに必要な依存関係を記述するだけで再現可能な環境が作成できます。",
+        "APIの設計においてはバージョニング戦略が重要です。 URLパスにバージョンを含める方法とヘッダーで指定する方法があります。",
+        "GitHub Actionsを使ったCI/CDパイプラインの構築方法を説明します。 テストの自動実行から本番環境へのデプロイまでを自動化できます。",
+        "Reactの状態管理にはuseStateとuseReducerの2つのフックがあります。 複雑な状態遷移にはuseReducerが適しています。",
+
+        # ── 英日混在 ──────────────────────────────────────────
+        "TensorFlowは Googleが開発した深層学習フレームワークで、PythonとC++のAPIを提供しています。",
+        "Kubernetes はコンテナオーケストレーションツールで、ポッドの自動スケーリング機能があります。",
+        "TypeScript は JavaScriptに型システムを追加した言語で、大規模開発に適しています。",
+        "PostgreSQL はオープンソースのリレーショナルデータベースで、JSONデータ型もサポートしています。",
+        "VSCode はマイクロソフトが開発したコードエディタで、拡張機能が豊富です。",
     ]
 
     # Duplicate and shuffle to create enough data for BPE training
