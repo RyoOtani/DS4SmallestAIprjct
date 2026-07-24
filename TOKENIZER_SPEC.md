@@ -32,12 +32,27 @@ This document specifies the tokenizer used by TinyLLM models.
 
 ## Loading
 
+### ⚠️ なぜ Qwen のトークナイザーか？
+
+TinyLLM は **まだ誰も大規模学習していない新プロジェクト** のため、現時点で独自の学習済みトークナイザーが存在しません。
+`Qwen/Qwen2.5-1.5B` の BPE トークナイザーが TinyLLM と同一の語彙サイズ (65,536) であり、
+アーキテクチャ互換性があるため **仮採用** しています。
+
+学習済み TinyLLM モデルが完成したら、独自トークナイザーに置き換え予定です。
+
 ### Python (HuggingFace Transformers)
 
 ```python
 from transformers import AutoTokenizer
 
+# 初回: Qwen 互換トークナイザーをロード
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B")
+
+# 自前トークナイザーとして保存 (次回から Qwen 不要)
+tokenizer.save_pretrained("tinyllm-tokenizer")
+
+# 次回以降: 自前トークナイザーを直接ロード
+tokenizer = AutoTokenizer.from_pretrained("tinyllm-tokenizer")
 
 # Add TinyLLM special tokens
 tokenizer.add_special_tokens({
