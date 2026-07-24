@@ -10,7 +10,9 @@ This document specifies the tokenizer used by TinyLLM models.
 | Vocabulary size | 65,536 |
 | Model type | `bpe` (HuggingFace: `tokenizers.models.BPE`) |
 | Pre-tokenizer | ByteLevel with regex splitting |
-| Source | Compatible with `Qwen/Qwen2.5-1.5B` tokenizer |
+| Bundled | `tokenizer/` (~45 KB, zero download) |
+| 🇯🇵 nano/small 推奨 | `tokyotech-llm/Swallow-7b-v0.1` — 日本語トークン化効率◎ |
+| Fallback | `Qwen/Qwen2.5-1.5B` (65,536 vocab, 同一アーキテクチャ) |
 
 ## Special Tokens
 
