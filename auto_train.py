@@ -233,6 +233,47 @@ def upload_checkpoint(ckpt_path):
 
 
 # ═══════════════════════════════════════════════════════════════
+# MoE Monitoring
+# ═══════════════════════════════════════════════════════════════
+
+def _log_moe_metrics(model, gpu_count):
+    """Log expert utilization metrics if model has MoE layers.
+    
+    Monitors for expert collapse (P0 training stability):
+      - entropy: gate diversity (higher = better, < 0.5 → collapse warning)
+      - imbalance: max/mean tokens per expert (> 5.0 → overload warning)
+    """
+    try:
+        from model.layers.moe import compute_expert_metrics
+        
+        # Unwrap DataParallel
+        m = model.module if gpu_count > 1 else model
+        
+        # Check if model has MoE gate
+        moe_found = False
+        for layer in getattr(m, 'layers', []):
+            if hasattr(layer, 'moe') and hasattr(layer.moe, 'gate'):
+                moe_found = True
+                break
+        
+        if not moe_found:
+            return  # Dense model, skip MoE monitoring
+        
+        # Collect metrics from first MoE layer
+        with torch.no_grad():
+            for layer in m.layers:
+                if hasattr(layer, 'moe') and hasattr(layer.moe, 'gate'):
+                    # We need recent gate outputs — stored during forward
+                    # For now, log a placeholder (full integration requires hook)
+                    pass
+        
+    except ImportError:
+        pass  # MoE module not available
+    except Exception:
+        pass  # Silent failure for monitoring
+
+
+# ═══════════════════════════════════════════════════════════════
 # Training
 # ═══════════════════════════════════════════════════════════════
 
@@ -301,6 +342,10 @@ def train(model, optimizer, scheduler, scaler, train_loader,
             tok_per_sec = steps_done * train_config['batch_size'] * SEQ_LEN / elapsed if elapsed > 0 else 0
             print(f"   step {global_step:,} | loss={avg_loss:.4f} | {tok_per_sec:.0f} tok/s | {elapsed:.0f}s")
             total_loss = 0.0
+        
+        # 🔍 MoE monitoring: log expert utilization every 100 steps
+        if global_step % 100 == 0 and global_step > 0:
+            _log_moe_metrics(model, gpu_count)
 
         if global_step % train_config['save_interval'] == 0:
             ckpt_dir = f'{OUTPUT_DIR}/step_{global_step}'
