@@ -209,7 +209,15 @@ def download_checkpoint():
 
 def upload_checkpoint(ckpt_path):
     """Upload checkpoint to HF."""
-    hf_token = os.environ.get('HF_TOKEN')
+    # Try Kaggle Secrets first, then environment variable
+    hf_token = None
+    try:
+        from kaggle_secrets import UserSecretsClient
+        hf_token = UserSecretsClient().get_secret('HF_TOKEN')
+    except (ImportError, Exception):
+        pass
+    if not hf_token:
+        hf_token = os.environ.get('HF_TOKEN')
     if not hf_token:
         print("⚠️  HF_TOKEN not set. Skipping upload.")
         return False
