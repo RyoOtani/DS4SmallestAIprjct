@@ -1,0 +1,97 @@
+name: Tokenizer Consistency CI
+
+on:
+  push:
+    paths:
+      - 'create_tokenizer.py'
+      - 'export_tokenizer.py'
+      - 'src/tokenizer.c'
+      - 'include/tokenizer_ids.h'
+      - 'tokenizer/**'
+      - 'test_3way_tokenizer.py'
+      - 'test_tokenizer_consistency.py'
+      - '.github/workflows/tokenizer-ci.yml'
+  pull_request:
+    paths:
+      - 'create_tokenizer.py'
+      - 'export_tokenizer.py'
+      - 'src/tokenizer.c'
+      - 'include/tokenizer_ids.h'
+      - 'tokenizer/**'
+      - 'test_3way_tokenizer.py'
+
+jobs:
+  tokenizer-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install tokenizers transformers
+
+      - name: Rebuild tokenizer
+        run: |
+          python create_tokenizer.py --vocab 32000
+          echo "Tokenizer rebuilt"
+
+      - name: Export TOKBIN
+        run: |
+          python export_tokenizer.py --input tokenizer/tokenizer.json --output tokenizer.tokbin
+          ls -lh tokenizer.tokbin
+
+      - name: Run 3-way consistency test
+        run: |
+          python test_3way_tokenizer.py
+          echo "3-way test passed"
+
+      - name: Verify TOKBIN header
+        run: |
+          python -c "
+          import struct
+          with open('tokenizer.tokbin', 'rb') as f:
+              magic, ver, vocab, merges, specials, maxb, flags = struct.unpack('<IIIIIII', f.read(28))
+          assert magic == 0x424B4F54, f'Bad magic: {magic:#x}'
+          assert ver == 2, f'Bad version: {ver}'
+          assert vocab == 32000, f'Bad vocab: {vocab}'
+          assert specials == 21, f'Bad specials: {specials}'
+          print(f'TOKBIN OK: vocab={vocab}, merges={merges}, specials={specials}')
+          "
+
+      - name: Verify special token IDs
+        run: |
+          python -c "
+          import json, struct
+          with open('tokenizer/tokenizer_config.json') as f:
+              cfg = json.load(f)
+          with open('tokenizer.tokbin', 'rb') as f:
+              f.seek(28)
+              tokbin_ids = [struct.unpack('<I', f.read(4))[0] for _ in range(21)]
+          py_ids = {}
+          for k, v in cfg.get('added_tokens_decoder', {}).items():
+              if v.get('special', False):
+                  py_ids[v['content']] = int(k)
+          expected = ['<s>','</s>','<pad>','<unk>','<fim_prefix>','<fim_suffix>','<fim_middle>',
+                      '<fim_hole>','<fim_pad>','<repo_name>','<file_sep>','<file_path>',
+                      '<tool_call>','</tool_call>','<tool_response>','</tool_response>',
+                      '<scratchpad>','</scratchpad>','<|system|>','<|user|>','<|assistant|>']
+          for i, name in enumerate(expected):
+              assert py_ids.get(name) == i, f'Python ID mismatch: {name}'
+              assert tokbin_ids[i] == i, f'TOKBIN ID mismatch: {name}'
+          print('All 21 special token IDs match across Python/TOKBIN/Expected')
+          "
+
+      - name: Summary
+        run: |
+          echo "✅ Tokenizer CI: ALL CHECKS PASSED"
+          echo "  - Tokenizer rebuild: 32,000 vocab"
+          echo "  - TOKBIN export: OK"
+          echo "  - 3-way consistency: PASS"
+          echo "  - Special token IDs: 21/21 match"

@@ -103,7 +103,7 @@ tinyllm agent tinyllm-nano.gguf "Find and fix all memory leaks in src/"
 │  ├─ GGUF loader (MoE weights)                        │
 │  ├─ MLA attention (NEON/AVX2 SIMD)                   │
 │  ├─ MoE router (top-k gating)                        │
-│  ├─ BPE tokenizer (65K vocab)                        │
+│  ├─ BPE tokenizer (32K vocab)                        │
 │  ├─ Speculative decoding (N-gram draft)              │
 │  ├─ HTTP server / CLI / Daemon                       │
 │  ├─ RAG (vector search) + long-term memory           │
@@ -285,7 +285,7 @@ TinyLLM/
 │   ├── attention.c         # MLA with NEON/AVX2 SIMD
 │   ├── moe.c               # MoE routing + expert computation
 │   ├── quantize.c          # Q4_0/Q6_K/Q8_0 dequantization
-│   ├── tokenizer.c         # BPE tokenizer (65K vocab)
+│   ├── tokenizer.c         # BPE tokenizer (32K vocab)
 │   ├── sampler.c           # top-k/top-p/temperature sampling
 │   ├── inference.c         # Speculative decoding
 │   └── main.c              # Entry point (CLI/server/daemon)
