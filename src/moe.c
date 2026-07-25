@@ -22,23 +22,34 @@ static inline float silu(float x) {
 /* ── MoE gate: route a hidden state to top-k experts ─────────────── */
 void tl_moe_gate(const tl_moe_gate_t *gate, const float *hidden,
                  int *expert_indices, float *expert_weights,
-                 int n_active) {
+                 int n_active, bool training, float gate_noise) {
     int n_experts = gate->n_experts;
     float *scores = tl_alloc(n_experts * sizeof(float));
 
     /* Gate: scores = gate_w @ hidden */
     tl_matvec(&gate->gate_w, hidden, scores, n_experts, gate->gate_w.cols);
 
-    /* Top-k selection (naive O(K*N), fine for n_experts ≤ 256) */
-    /* Use a simple selection sort for top-k */
-    /* Initialize indices */
+    /* 🔄 Noisy gating during training: add Gaussian noise
+       to prevent expert collapse (positive feedback loop).
+       Box-Muller transform for Gaussian from uniform random. */
+    if (training && gate_noise > 0.0f) {
+        for (int i = 0; i < n_experts; i++) {
+            float u1 = (float)rand() / (float)RAND_MAX;
+            float u2 = (float)rand() / (float)RAND_MAX;
+            /* Avoid log(0) */
+            if (u1 < 1e-6f) u1 = 1e-6f;
+            float noise = gate_noise * sqrtf(-2.0f * logf(u1)) * cosf(2.0f * 3.14159265f * u2);
+            scores[i] += noise;
+        }
+    }
+
+    /* Top-k selection (selection sort, O(K*N), fine for n_experts ≤ 256) */
     for (int i = 0; i < n_experts; i++) expert_indices[i] = -1;
 
     for (int k = 0; k < n_active; k++) {
         float best_score = -1e10f;
         int   best_idx   = -1;
         for (int i = 0; i < n_experts; i++) {
-            /* Skip already selected */
             bool taken = false;
             for (int j = 0; j < k; j++)
                 if (expert_indices[j] == i) { taken = true; break; }
@@ -62,8 +73,10 @@ void tl_moe_gate(const tl_moe_gate_t *gate, const float *hidden,
         expert_weights[k] = expf(expert_weights[k] - max_w);
         sum += expert_weights[k];
     }
-    for (int k = 0; k < n_active; k++)
-        expert_weights[k] /= sum;
+    if (sum > 0.0f) {
+        for (int k = 0; k < n_active; k++)
+            expert_weights[k] /= sum;
+    }
 
     tl_free(scores);
 }
@@ -105,8 +118,8 @@ void tl_moe_forward(const tl_moe_layer_t *moe, const float *hidden,
     float  *ffn_ws     = expert_out + D;
     /* remaining workspace for FFN internal use */
 
-    /* Route to top-k experts */
-    tl_moe_gate(&moe->gate, hidden, expert_idx, expert_w, n_active);
+    /* Route to top-k experts (inference mode: no noise) */
+    tl_moe_gate(&moe->gate, hidden, expert_idx, expert_w, n_active, false, 0.0f);
 
     /* Weighted sum of expert outputs */
     memset(output, 0, D * sizeof(float));
@@ -147,7 +160,7 @@ float tl_moe_load_balance_loss(const tl_moe_layer_t *moe,
     for (int b = 0; b < batch_size; b++) {
         int idx[TL_MAX_ACTIVE_EXPERTS];
         float w[TL_MAX_ACTIVE_EXPERTS];
-        tl_moe_gate(&moe->gate, hidden + b * D, idx, w, moe->n_active);
+        tl_moe_gate(&moe->gate, hidden + b * D, idx, w, moe->n_active, true, 0.1f);
 
         for (int k = 0; k < moe->n_active; k++) {
             if (idx[k] >= 0) {
