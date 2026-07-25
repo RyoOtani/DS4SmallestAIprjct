@@ -18,6 +18,14 @@ import os, sys, json, struct, time
 import numpy as np
 import torch
 
+# Import quantization module
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from training.quantize import (
+    QuantType, quantize_q4_0, quantize_q4_1, quantize_q4_k,
+    dequantize_q4_0, dequantize_q4_1, dequantize_q4_k,
+    quantize_model_weights,
+)
+
 # ═══════════════════════════════════════════════════════════════════
 # GGUF constants (matching src/model.c and include/config.h)
 # ═══════════════════════════════════════════════════════════════════
@@ -29,6 +37,8 @@ GGUF_ALIGNMENT = 32
 GGML_TYPE_F32 = 0
 GGML_TYPE_F16 = 1
 GGML_TYPE_Q4_0 = 2
+GGML_TYPE_Q4_1 = 3
+GGML_TYPE_Q4_K = 14  # Q4_K_M in GGUF
 
 # GGUF value types
 GGUF_TYPE_U32 = 4
@@ -119,8 +129,16 @@ class TinyLLMModel(torch.nn.Module):
 # GGUF Export
 # ═══════════════════════════════════════════════════════════════════
 
-def export_to_gguf(model, output_path, config, use_q4=False):
-    """Export notebook TinyLLM model to GGUF for C engine."""
+def export_to_gguf(model, output_path, config, use_q4=False, qtype=QuantType.Q4_K_M):
+    """Export notebook TinyLLM model to GGUF for C engine.
+    
+    Args:
+        model: TinyLLMModel instance
+        output_path: output .gguf file path
+        config: model config dict
+        use_q4: if True, quantize weights to 4-bit
+        qtype: quantization type (Q4_0, Q4_1, Q4_K_M)
+    """
     D = config['hidden_size']
     V = config['vocab_size']
     L = config['num_hidden_layers']
@@ -131,50 +149,89 @@ def export_to_gguf(model, output_path, config, use_q4=False):
     kv_latent = D
 
     state_dict = model.state_dict()
-    tensors = []  # list of (name, data, ggml_type, shape)
+    tensors = []  # list of (name, data_or_dict, ggml_type, shape)
 
-    def add_tensor(name, data, qtype=GGML_TYPE_F32):
+    def add_tensor(name, data, qtype_override=None):
+        """Add tensor, optionally quantizing if use_q4 is True."""
         data_np = data.detach().cpu().float().numpy()
-        tensors.append((name, data_np, qtype))
+        
+        if use_q4 and data_np.ndim >= 2:
+            # Quantize weight matrices (not norms, embeddings, etc.)
+            n = data_np.size
+            if qtype == QuantType.Q4_0:
+                pad = (32 - n % 32) % 32
+                if pad > 0:
+                    data_np = np.pad(data_np.ravel(), (0, pad), 'constant').reshape(-1)
+                else:
+                    data_np = data_np.ravel()
+                qdata, scales = quantize_q4_0(data_np)
+                tensors.append((name, {'qdata': qdata, 'scales': scales, 'qtype': 'q4_0'},
+                               GGML_TYPE_Q4_0, list(data.shape)))
+            elif qtype == QuantType.Q4_1:
+                pad = (32 - n % 32) % 32
+                if pad > 0:
+                    data_np = np.pad(data_np.ravel(), (0, pad), 'constant').reshape(-1)
+                else:
+                    data_np = data_np.ravel()
+                qdata, scales, mins = quantize_q4_1(data_np)
+                tensors.append((name, {'qdata': qdata, 'scales': scales, 'mins': mins, 'qtype': 'q4_1'},
+                               GGML_TYPE_Q4_1, list(data.shape)))
+            elif qtype == QuantType.Q4_K_M:
+                pad = (256 - n % 256) % 256
+                if pad > 0:
+                    data_np = np.pad(data_np.ravel(), (0, pad), 'constant').reshape(-1)
+                else:
+                    data_np = data_np.ravel()
+                result = quantize_q4_k(data_np)
+                result['qtype'] = 'q4_k_m'
+                tensors.append((name, result, GGML_TYPE_Q4_K, list(data.shape)))
+            else:
+                data_np = data.detach().cpu().float().numpy()
+                tensors.append((name, data_np, qtype_override or GGML_TYPE_F32, list(data_np.shape)))
+        else:
+            qt = qtype_override or GGML_TYPE_F32
+            tensors.append((name, data_np, qt, list(data_np.shape)))
 
-    # ── Embedding ───────────────────────────────────────────────
-    add_tensor("token_embd.weight", state_dict["embed.weight"])
+    # ── Embedding (keep FP32 — small, needs precision) ─────────
+    tensors.append(("token_embd.weight",
+                    state_dict["embed.weight"].detach().cpu().float().numpy(),
+                    GGML_TYPE_F32,
+                    list(state_dict["embed.weight"].shape)))
 
     # ── Layers ──────────────────────────────────────────────────
     for l in range(L):
         p = f"layers.{l}."
-
-        # Attention: notebook → GGUF mapping
-        # q_proj (D×D) → attn_q (D×D) — OK
         add_tensor(f"blk.{l}.attn_q.weight", state_dict[f"{p}q_proj.weight"])
-
-        # k_proj (D×D) → attn_k (D×D) — when kv_latent==D, w_k_up is [n_heads*head_dim, latent] = [D, D]
         add_tensor(f"blk.{l}.attn_k.weight", state_dict[f"{p}k_proj.weight"])
-
-        # v_proj (D×D) → attn_v (D×D) — same reasoning
         add_tensor(f"blk.{l}.attn_v.weight", state_dict[f"{p}v_proj.weight"])
-
-        # o_proj → attn_output
         add_tensor(f"blk.{l}.attn_output.weight", state_dict[f"{p}o_proj.weight"])
-
-        # kV compress = Identity (so no actual compression happens)
+        
+        # KV compress = Identity (no actual compression, needs to be FP32)
         identity = np.eye(D, dtype=np.float32)
-        tensors.append((f"blk.{l}.attn_kv_a.weight", identity, GGML_TYPE_F32))
-
-        # RMS Norms
-        add_tensor(f"blk.{l}.attn_norm.weight", state_dict[f"{p}norm1.weight"])
-        add_tensor(f"blk.{l}.ffn_norm.weight", state_dict[f"{p}norm2.weight"])
-
-        # FFN (dense)
+        tensors.append((f"blk.{l}.attn_kv_a.weight", identity, GGML_TYPE_F32, [D, D]))
+        
+        # RMS Norms (keep FP32 — small)
+        tensors.append((f"blk.{l}.attn_norm.weight",
+                        state_dict[f"{p}norm1.weight"].detach().cpu().float().numpy(),
+                        GGML_TYPE_F32, list(state_dict[f"{p}norm1.weight"].shape)))
+        tensors.append((f"blk.{l}.ffn_norm.weight",
+                        state_dict[f"{p}norm2.weight"].detach().cpu().float().numpy(),
+                        GGML_TYPE_F32, list(state_dict[f"{p}norm2.weight"].shape)))
+        
+        # FFN
         add_tensor(f"blk.{l}.ffn_gate.weight", state_dict[f"{p}gate_proj.weight"])
         add_tensor(f"blk.{l}.ffn_up.weight", state_dict[f"{p}up_proj.weight"])
         add_tensor(f"blk.{l}.ffn_down.weight", state_dict[f"{p}down_proj.weight"])
 
     # ── Final norm ──────────────────────────────────────────────
-    add_tensor("output_norm.weight", state_dict["norm.weight"])
+    tensors.append(("output_norm.weight",
+                    state_dict["norm.weight"].detach().cpu().float().numpy(),
+                    GGML_TYPE_F32, list(state_dict["norm.weight"].shape)))
 
-    # ── LM head ─────────────────────────────────────────────────
-    add_tensor("output.weight", state_dict["lm_head.weight"])
+    # ── LM head (keep FP32 — critical for output quality) ──────
+    tensors.append(("output.weight",
+                    state_dict["lm_head.weight"].detach().cpu().float().numpy(),
+                    GGML_TYPE_F32, list(state_dict["lm_head.weight"].shape)))
 
     # ── Write GGUF file ─────────────────────────────────────────
     n_tensors = len(tensors)
@@ -217,26 +274,33 @@ def export_to_gguf(model, output_path, config, use_q4=False):
 
         # Tensor info
         offset = 0
-        for name, data, qtype in tensors:
+        for name, data, qtype, shape in tensors:
             write_string(f, name)
-            shape = data.shape
             n_dims = len(shape)
             f.write(struct.pack('<I', n_dims))
             for d in shape:
                 f.write(struct.pack('<Q', d))
             f.write(struct.pack('<I', qtype))
 
-            # Compute byte size
-            nelem = int(np.prod(shape))
+            # Compute byte size based on type
             if qtype == GGML_TYPE_F32:
-                bsize = nelem * 4
+                bsize = int(np.prod(shape)) * 4
             elif qtype == GGML_TYPE_F16:
-                bsize = nelem * 2
-            elif qtype == GGML_TYPE_Q4_0:
+                bsize = int(np.prod(shape)) * 2
+            elif qtype in (GGML_TYPE_Q4_0, GGML_TYPE_Q4_1):
+                # Block size 32: 16 bytes nibbles + 2 bytes scale (+2 bytes min for Q4_1)
+                nelem = int(np.prod(shape))
                 n_blocks = (nelem + 31) // 32
-                bsize = n_blocks * (16 + 2)  # nibbles + fp16 scale
+                bsize = n_blocks * (16 + 2)
+                if qtype == GGML_TYPE_Q4_1:
+                    bsize += n_blocks * 2  # extra min per block
+            elif qtype == GGML_TYPE_Q4_K:
+                # Super-block 256: 128 bytes nibbles + 2+2+12 bytes scale data
+                nelem = int(np.prod(shape))
+                n_super = (nelem + 255) // 256
+                bsize = n_super * (128 + 2 + 2 + 12)
             else:
-                bsize = nelem * 4
+                bsize = int(np.prod(shape)) * 4
 
             f.write(struct.pack('<Q', offset))
             offset += bsize
@@ -246,11 +310,27 @@ def export_to_gguf(model, output_path, config, use_q4=False):
         align_file(f)
 
         # Tensor data
-        for name, data, qtype in tensors:
+        for name, data, qtype, shape in tensors:
             if qtype == GGML_TYPE_F32:
                 f.write(data.astype(np.float32).tobytes())
             elif qtype == GGML_TYPE_F16:
                 f.write(data.astype(np.float16).tobytes())
+            elif qtype == GGML_TYPE_Q4_0:
+                # Write Q4_0: qdata (nibbles) + scales (fp16)
+                f.write(data['qdata'].tobytes())
+                f.write(data['scales'].astype(np.float16).tobytes())
+            elif qtype == GGML_TYPE_Q4_1:
+                # Write Q4_1: qdata + scales + mins
+                f.write(data['qdata'].tobytes())
+                f.write(data['scales'].astype(np.float16).tobytes())
+                f.write(data['mins'].astype(np.float16).tobytes())
+            elif qtype == GGML_TYPE_Q4_K:
+                # Write Q4_K_M: qdata + d + dmin + sub_scales + sub_mins
+                f.write(data['qdata'].tobytes())
+                f.write(data['d'].astype(np.float16).tobytes())
+                f.write(data['dmin'].astype(np.float16).tobytes())
+                f.write(data['scales'].tobytes())
+                f.write(data['mins'].tobytes())
             else:
                 f.write(data.astype(np.float32).tobytes())
             align_file(f)
@@ -268,22 +348,33 @@ def export_to_gguf(model, output_path, config, use_q4=False):
 def main():
     MODEL_DIR = "downloaded_models/tinyllm-nano"
     OUTPUT = "tinyllm-nano.gguf"
+    QTYPE = QuantType.F32
 
     # Parse args
     if '--output' in sys.argv:
         idx = sys.argv.index('--output')
         OUTPUT = sys.argv[idx + 1]
-    use_q4 = '--q4' in sys.argv
-
+    
+    use_q4 = '--q4' in sys.argv or '--q4_0' in sys.argv or '--q4_k' in sys.argv
+    
+    if '--q4_k' in sys.argv:
+        QTYPE = QuantType.Q4_K_M
+    elif '--q4_1' in sys.argv:
+        QTYPE = QuantType.Q4_1
+    elif '--q4' in sys.argv or '--q4_0' in sys.argv:
+        QTYPE = QuantType.Q4_0
+    
     # Load config
     with open(f"{MODEL_DIR}/config.json") as f:
         config = json.load(f)
-    config['vocab_size'] = 4639
+    config['vocab_size'] = 32000  # v7 tokenizer
     config['hidden_size'] = 1024
     config['num_hidden_layers'] = 24
     config['intermediate_size'] = 2816
 
     print(f"📋 Config: hidden={config['hidden_size']}, layers={config['num_hidden_layers']}, vocab={config['vocab_size']}")
+    if use_q4:
+        print(f"🔧 Quantization: {QTYPE.name}")
 
     # Create model
     model = TinyLLMModel(config)
@@ -291,11 +382,19 @@ def main():
     # Load weights
     ckpt = torch.load(f"{MODEL_DIR}/model.pt", map_location='cpu', weights_only=True)
     model.load_state_dict(ckpt['model_state_dict'], strict=True)
-    print(f"✅ Loaded checkpoint ({sum(p.numel() for p in model.parameters())/1e6:.0f}M params)")
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"✅ Loaded checkpoint ({total_params/1e6:.0f}M params)")
+    
+    # Estimated sizes
+    fp32_mb = total_params * 4 / (1024**2)
+    fp16_mb = total_params * 2 / (1024**2)
+    q4_mb = total_params * 0.55  # ~4.5 bpw ≈ 0.55 bytes per param
+    print(f"   Est. FP32: {fp32_mb:.0f} MB | FP16: {fp16_mb:.0f} MB | Q4: {q4_mb:.0f} MB")
 
     # Export
-    export_to_gguf(model, OUTPUT, config, use_q4=use_q4)
-    print(f"\n🎉 Ready! Run: ./tinyllm run {OUTPUT}")
+    export_to_gguf(model, OUTPUT, config, use_q4=use_q4, qtype=QTYPE)
+    actual_mb = os.path.getsize(OUTPUT) / (1024 * 1024)
+    print(f"\n🎉 Ready! {actual_mb:.0f} MB → ./tinyllm run {OUTPUT}")
 
 
 if __name__ == "__main__":
