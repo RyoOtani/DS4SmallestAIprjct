@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
 """
-TinyLLM Tokenizer v7 — Real Data + Synthetic for 32K Vocab
+TinyLLM Tokenizer v7.1 — Real Data + Synthetic for 32K Vocab
 
 Strategy:
   1. Download real code (CodeParrot) & wiki text via HuggingFace datasets
-  2. Use heavy multiplication to ensure BPE finds enough pair frequencies
-  3. Fall back to aggressive synthetic if download fails
+  2. Generate ~260K lines of varied synthetic code/text
+  3. Use moderate multiplication ONLY if corpus < 10M chars (with warning)
+  4. Fall back to aggressive synthetic if download fails
 
 ByteLevel BPE needs ~50M+ chars for 32K vocab.
-Target: ~5M chars of diverse, multiply-heavy corpus.
+Target: ~15M chars of diverse corpus (×3 multiplier → 45M chars).
+  
+⚠️  QUALITY NOTE: Synthetic corpus with multiplier can cause vocabulary bias.
+  For production use, provide real data via --corpus-dir or --corpus-file.
+  Recommended: 50MB+ of real code + text for unbiased 32K vocab training.
+
+Usage:
+  python create_tokenizer.py                        # Default: synthetic
+  python create_tokenizer.py --corpus-dir ./corpus  # Load .txt files
+  python create_tokenizer.py --corpus-file data.txt # Single file
+  python create_tokenizer.py --vocab 65536          # Larger vocab
 """
 
 import json, os, sys, argparse, random, io, tempfile
@@ -208,7 +219,7 @@ def synthetic_corpus():
 # Tokenizer
 # ═══════════════════════════════════════════════════════════════
 
-def create_tokenizer(output_dir="tokenizer", vocab_size=32000):
+def create_tokenizer(output_dir="tokenizer", vocab_size=32000, corpus_dir=None, corpus_file=None):
     try:
         from tokenizers import Tokenizer, models, pre_tokenizers, decoders, trainers, processors
         from tokenizers.normalizers import NFKC
@@ -247,30 +258,54 @@ def create_tokenizer(output_dir="tokenizer", vocab_size=32000):
     real = download_real_data()
     synthetic = synthetic_corpus()
     
-    corpus = real + synthetic
+    # Load external corpus files if provided
+    external = []
+    if corpus_dir and os.path.isdir(corpus_dir):
+        for fname in sorted(os.listdir(corpus_dir)):
+            fpath = os.path.join(corpus_dir, fname)
+            if fname.endswith(('.txt', '.py', '.js', '.ts', '.rs', '.go', '.c', '.h', '.md')):
+                try:
+                    with open(fpath, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if 5 < len(line) < 1000:
+                                external.append(line)
+                except: pass
+        print(f"  Corpus dir:  {len(external):,} lines from {corpus_dir}")
+    if corpus_file and os.path.isfile(corpus_file):
+        try:
+            with open(corpus_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if 5 < len(line) < 1000:
+                        external.append(line)
+            print(f"  Corpus file: {len(external):,} lines from {corpus_file}")
+        except: pass
+    
+    corpus = real + synthetic + external
     random.shuffle(corpus)
     
     total_chars = sum(len(l) for l in corpus)
     print(f"  Real data:  {len(real):,} lines")
     print(f"  Synthetic:  {len(synthetic):,} lines")
+    print(f"  External:   {len(external):,} lines")
     print(f"  Total:      {len(corpus):,} lines (~{total_chars/1_000_000:.1f}M chars)")
 
-    # For ByteLevel BPE to reach 32K, we need LOTS of repetition
-    # to make byte pairs frequent enough. Multiply corpus heavily.
-    multiplier = max(1, int(50_000_000 / max(total_chars, 1)))
-    multiplier = min(multiplier, 20)  # cap at 20x to avoid memory issues
-    if multiplier > 1:
-        corpus = corpus * multiplier
-        print(f"  Multiplier:  x{multiplier} → {len(corpus):,} lines (~{total_chars*multiplier/1_000_000:.1f}M chars)")
-
-    # If still too small, pad with single-char repetition
-    if total_chars * multiplier < 10_000_000:
-        print("  ⚠ Corpus too small for 32K — adding padding repetitions...")
-        extra = []
-        for line in corpus[:2000]:
-            extra.extend([line] * 20)
-        corpus.extend(extra)
-        print(f"  After padding: {len(corpus):,} lines")
+    # ByteLevel BPE requires sufficient corpus to discover merge rules.
+    # If corpus is too small, moderate repetition is acceptable —
+    # but excessive repetition causes vocabulary bias toward repeated patterns.
+    # Best practice: provide 50MB+ of real text via --corpus-dir.
+    MIN_CHARS = 30_000_000  # 30M chars minimum for 32K vocab
+    if total_chars < MIN_CHARS:
+        multiplier = min(int(MIN_CHARS / max(total_chars, 1)), 15)
+        if multiplier > 1:
+            print(f"  ⚠️  Corpus too small ({total_chars/1e6:.1f}M chars < {MIN_CHARS/1e6:.0f}M)")
+            print(f"     Using x{multiplier} repetition (may cause slight vocabulary bias)")
+            print(f"     For production: add real data with --corpus-dir ./my_texts/")
+            corpus = corpus * multiplier
+            print(f"     → {len(corpus):,} lines (~{total_chars*multiplier/1_000_000:.1f}M chars)")
+    else:
+        print(f"  ✅ Corpus sufficient ({total_chars/1e6:.1f}M chars), no repetition needed")
 
     # Train
     print(f"\nTraining BPE (vocab={vocab_size:,}, min_freq=1)...")
@@ -354,11 +389,13 @@ def test_tokenizer(output_dir="tokenizer"):
 
 
 if __name__ == '__main__':
-    p = argparse.ArgumentParser(description='TinyLLM Tokenizer v7')
+    p = argparse.ArgumentParser(description='TinyLLM Tokenizer v7.1')
     p.add_argument('--test', action='store_true', help='Test after building')
     p.add_argument('--output', default='tokenizer', help='Output directory')
     p.add_argument('--vocab', type=int, default=32000, help='Target vocab size')
+    p.add_argument('--corpus-dir', default=None, help='Directory with .txt/.py/.js etc files')
+    p.add_argument('--corpus-file', default=None, help='Single text file for corpus')
     args = p.parse_args()
-    create_tokenizer(args.output, args.vocab)
+    create_tokenizer(args.output, args.vocab, args.corpus_dir, args.corpus_file)
     if args.test:
         test_tokenizer(args.output)

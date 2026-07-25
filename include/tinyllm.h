@@ -9,6 +9,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+/* ── Canonical special token IDs (single source of truth) ────────── */
+#include "tokenizer_ids.h"
+
 /* ═══════════════════════════════════════════════════════════════════
    Tensor / Matrix types
    ═══════════════════════════════════════════════════════════════════ */
