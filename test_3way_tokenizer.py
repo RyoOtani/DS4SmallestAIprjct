@@ -66,12 +66,8 @@ def test_layer1_python():
         decoded = tok.decode(ids, skip_special_tokens=True)
         
         # Round-trip: skip_special_tokens removes FIM/tool tokens, which is correct behavior.
-        # For FIM/Tool tests, the original text has special tokens that get stripped.
-        # Check if decoded text contains the core content (non-special parts)
         rt_ok = True
         if label in ('FIM', 'ToolCall'):
-            # For FIM/Tool, we expect special tokens to be stripped in RT
-            # Core check: the non-special content should be preserved
             rt_ok = ('def sort' in decoded or 'read_file' in decoded)
         else:
             rt_ok = (decoded == text)
@@ -81,9 +77,10 @@ def test_layer1_python():
         expected_in_seq = [tid for tid in expected_specials if tid not in (0, 1)]
         specials_ok = (specials_in_seq == expected_in_seq)
         
+        if not rt_ok or not specials_ok:
+            all_ok = False
+        
         status = "✅" if (rt_ok and specials_ok) else "⚠️"
-        if not rt_ok:
-            status = "⚠️" 
         print(f"  {status} {label:15s} → {len(ids):4d} tokens, rt={'OK' if rt_ok else 'DIFF'}, specials={'OK' if specials_ok else 'MISS'}")
         results[label] = {'ids': ids, 'decoded': decoded, 'rt_ok': rt_ok}
     

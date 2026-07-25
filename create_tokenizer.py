@@ -232,8 +232,17 @@ def create_tokenizer(output_dir="tokenizer", vocab_size=32000, corpus_dir=None, 
     print(f"TinyLLM Tokenizer v7 — Target vocab={vocab_size:,}")
     print("=" * 60)
 
-    tok = Tokenizer(models.BPE(unk_token=None))
+    # Create tokenizer — ByteLevel BPE with explicit unk_token for HF compatibility.
+    # GPT-2 uses unk_token=None (no unknown tokens, byte-level handles everything),
+    # but HF configs require an explicit unk_token for downstream compatibility.
+    # We write "<unk>" in tokenizer_config.json so HF AutoTokenizer works correctly.
+    tok = Tokenizer(models.BPE(unk_token="<unk>"))
     tok.normalizer = NFKC()
+    # add_prefix_space=False: do NOT prepend space before text.
+    # GPT-2 uses True (space prefix for word-initial tokens like "Ġword").
+    # We use False because our post_processor handles BOS/EOS boundaries directly.
+    # If training on English-heavy data with GPT-2 compatibility needs,
+    # switch to True and re-validate with test_3way_tokenizer.py.
     tok.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=True)
     tok.decoder = decoders.ByteLevel()
     tok.post_processor = processors.TemplateProcessing(
@@ -308,13 +317,13 @@ def create_tokenizer(output_dir="tokenizer", vocab_size=32000, corpus_dir=None, 
         print(f"  ✅ Corpus sufficient ({total_chars/1e6:.1f}M chars), no repetition needed")
 
     # Train
-    print(f"\nTraining BPE (vocab={vocab_size:,}, min_freq=1)...")
+    print(f"\nTraining BPE (vocab={vocab_size:,}, min_freq=2)...")
     trainer = trainers.BpeTrainer(
         vocab_size=vocab_size,
         special_tokens=special,
         show_progress=True,
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
-        min_frequency=1,
+        min_frequency=2,  # require ≥2 occurrences → reduces rare/noise tokens
     )
     tok.train_from_iterator(corpus, trainer)
     tok.save(f"{output_dir}/tokenizer.json")

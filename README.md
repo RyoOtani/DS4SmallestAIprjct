@@ -278,16 +278,20 @@ huggingface-cli upload Ryo3desu/tinyllm-models your-model.gguf tinyllm-small/you
 
 ### Tokenizer
 
-TinyLLM uses a **BPE tokenizer with 65,536 vocabulary**, compatible with HuggingFace:
+TinyLLM uses a **ByteLevel BPE tokenizer with 32,000 vocabulary** (v7.1), bundled in-repo:
 
 | Property | Value |
 |----------|-------|
-| Type | BPE (Byte-Pair Encoding) |
-| Vocab size | 65,536 |
-| Special tokens | `<s>`=0, `</s>`=1, `<pad>`=2, `<unk>`=3, FIM tokens |
-| Source | [Qwen/Qwen2.5-1.5B](https://huggingface.co/Qwen/Qwen2.5-1.5B) (compatible) |
-| Load with | `AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5B")` |
-| Add tokens | `<fim_prefix>`, `<fim_suffix>`, `<fim_middle>`, `<tool_call>`, `</tool_call>` |
+| Type | ByteLevel BPE (GPT-2 architecture) + NFKC normalization |
+| Vocab size | **32,000** (21 specials + 256 bytes + 31,723 BPE merges) |
+| Special tokens | `<s>`=0, `</s>`=1, `<pad>`=2, `<unk>`=3, FIM (4-8), Tool (12-15), Chat (18-20) |
+| Python (bundled) | `AutoTokenizer.from_pretrained('tokenizer')` — 3.3 MB, zero download |
+| C runtime | `tl_tokenizer_load("tokenizer.tokbin")` — 950 KB binary |
+| Rebuild | `python create_tokenizer.py` (any vocab size) |
+| Verify | `python test_3way_tokenizer.py` — Python↔C↔TOKBIN consistency |
+
+> **Note**: The default vocab size is 32,000 (not 65,536). For larger vocabularies,
+> use `python create_tokenizer.py --vocab 65536`. See `TOKENIZER_SPEC.md` for full specification.
 
 ### Recommended Training Data
 

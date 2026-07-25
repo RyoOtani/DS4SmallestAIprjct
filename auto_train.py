@@ -120,19 +120,22 @@ class TinyLLMModel(nn.Module):
 
 def load_tokenizer():
     from transformers import AutoTokenizer
-    # Try local paths
-    for path in ['downloaded_models/tinyllm-nano', 'tinyllm-tokenizer', 'tokenizer']:
+    # Try local paths (prioritize bundled 32K tokenizer)
+    for path in ['tokenizer', 'downloaded_models/tinyllm-nano', 'tinyllm-tokenizer']:
         if os.path.exists(f'{path}/tokenizer.json'):
             tok = AutoTokenizer.from_pretrained(path, use_fast=True)
-            tok.add_special_tokens({'additional_special_tokens': [
-                '<fim_prefix>', '<fim_suffix>', '<fim_middle>',
-                '<pad>', '<tool_call>', '</tool_call>',
-            ]})
+            # Only add special tokens that don't already exist (avoid ID reassignment)
+            existing = set(tok.get_vocab().keys())
+            to_add = [t for t in ['<fim_prefix>', '<fim_suffix>', '<fim_middle>',
+                                   '<pad>', '<tool_call>', '</tool_call>']
+                      if t not in existing]
+            if to_add:
+                tok.add_special_tokens({'additional_special_tokens': to_add})
             if tok.pad_token is None: tok.pad_token = '<pad>'
             if tok.bos_token is None: tok.bos_token = '<s>'
             if tok.eos_token is None: tok.eos_token = '</s>'
             return tok
-    # Fallback: download Swallow
+    # Fallback: download Swallow (Japanese-optimized, 32K vocab)
     tok = AutoTokenizer.from_pretrained("tokyotech-llm/Swallow-7b-v0.1", use_fast=True)
     tok.save_pretrained('tinyllm-tokenizer')
     return tok
