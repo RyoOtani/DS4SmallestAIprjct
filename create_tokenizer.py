@@ -1,335 +1,226 @@
 #!/usr/bin/env python3
 """
-TinyLLM Custom Tokenizer — GPT-2 ByteLevel BPE x DeepSeek Coder x Japanese
+TinyLLM Tokenizer v7 — Real Data + Synthetic for 32K Vocab
 
-Design:
-  - ByteLevel BPE (GPT-2): no <unk>, handles any Unicode including Japanese
-  - Large vocab: 65536 — room for code tokens + Japanese + English
-  - FIM support (DeepSeek Coder): <fim_prefix>, <fim_suffix>, <fim_middle>
-  - Tool tokens: <tool_call>, </tool_call>, <scratchpad>, </scratchpad>
-  - Whitespace-preserving: critical for code indentation
-  - Digit-aware: numbers get tokenized sensibly for code comprehension
-  - Training: 60% code + 25% English text + 15% Japanese text
+Strategy:
+  1. Download real code (CodeParrot) & wiki text via HuggingFace datasets
+  2. Use heavy multiplication to ensure BPE finds enough pair frequencies
+  3. Fall back to aggressive synthetic if download fails
 
-Usage:
-    python create_tokenizer.py          # Build and save to tokenizer/
-    python create_tokenizer.py --test   # Test the tokenizer
+ByteLevel BPE needs ~50M+ chars for 32K vocab.
+Target: ~5M chars of diverse, multiply-heavy corpus.
 """
 
-import json, os, argparse
+import json, os, sys, argparse, random, io, tempfile
 
-# ── Training corpus: code-heavy bilingual ──────────────────────
+random.seed(42)
 
-def code_samples():
-    """60% of training data — extensive code patterns across 8 languages."""
-    return [
-        # ── Python ──────────────────────────────────────────
-        "import os, sys, json, re, math, time, datetime, logging",
-        "from typing import Optional, List, Dict, Tuple, Union, Any, Callable",
-        "from dataclasses import dataclass, field, asdict",
-        "from collections import defaultdict, deque, Counter, OrderedDict, namedtuple",
-        "from functools import lru_cache, partial, reduce, wraps, cached_property",
-        "from pathlib import Path",
-        "from contextlib import contextmanager, suppress, nullcontext",
-        "from itertools import chain, product, permutations, combinations, zip_longest",
-        "import numpy as np, torch, torch.nn as nn",
-        "import torch.nn.functional as F",
-        "from torch.utils.data import Dataset, DataLoader, IterableDataset",
-        "from torch.optim import AdamW, Adam, SGD",
-        "from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR",
-        "from transformers import AutoModel, AutoTokenizer, AutoConfig",
-        "def __init__(self, config: Config) -> None:",
-        "class TransformerLayer(nn.Module):",
-        "    def forward(self, x: torch.Tensor) -> torch.Tensor:",
-        "self.attention = MultiHeadAttention(d_model, n_heads)",
-        "self.norm1 = nn.LayerNorm(d_model, eps=1e-5)",
-        "self.norm2 = nn.RMSNorm(d_model, eps=1e-5)",
-        "self.ffn = SwiGLU(d_model, d_ff)",
-        "return F.softmax(logits, dim=-1)",
-        "loss = F.cross_entropy(logits, labels, ignore_index=-100)",
-        "optimizer = torch.optim.AdamW(params, lr=3e-4, weight_decay=0.1)",
-        "scheduler = CosineAnnealingLR(optimizer, T_max=100000)",
-        "with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):",
-        "yield from iterable",
-        "async def fetch(url: str) -> dict:",
-        "    async with aiohttp.ClientSession() as session:",
-        "        async with session.get(url) as resp:",
-        "            return await resp.json()",
-        "try: result = await process(data)",
-        "except ValueError as e: logger.error(f'Invalid: {e}')",
-        "except RuntimeError: raise",
-        "finally: cleanup()",
-        "@property\ndef name(self) -> str:\n    return self._name",
-        "@staticmethod\ndef from_config(cfg: dict) -> 'Model':",
-        "@classmethod\ndef create(cls) -> Self:",
-        "if __name__ == '__main__':\n    main()",
-        "assert isinstance(x, int), f'Expected int, got {type(x)}'",
-        "match status_code:\n    case 200: return 'OK'\n    case 404: return 'Not Found'",
-        "result = [x for x in data if x > 0]",
-        "lambda x: x * x + 1",
-        "kwargs = {'key': value, 'another': 42}",
-        "enumerate(items, start=1)",
-        "zip(a, b, c)",
-        "sorted(data, key=lambda x: x.name, reverse=True)",
-        "hasattr(obj, 'method')",
-        "getattr(obj, 'attr', default)",
-        "setattr(obj, 'key', value)",
-        "isinstance(x, (int, float))",
-        "issubclass(Derived, Base)",
-        # ── C / C++ ─────────────────────────────────────────
-        "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdint.h>",
-        "#include <stdbool.h>\n#include <math.h>\n#include <pthread.h>\n#include <unistd.h>",
-        "#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>",
-        "#define MAX(a, b) ((a) > (b) ? (a) : (b))",
-        "#define MIN(a, b) ((a) < (b) ? (a) : (b))",
-        "#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))",
-        "#define UNUSED(x) (void)(x)",
-        "#define likely(x)   __builtin_expect(!!(x), 1)",
-        "#define unlikely(x) __builtin_expect(!!(x), 0)",
-        "typedef struct { int x; int y; float val; } Point;",
-        "typedef enum { OK, ERROR, TIMEOUT, PENDING } Status;",
-        "static inline int clamp(int x, int lo, int hi) {",
-        "void* malloc(size_t size);\nvoid* calloc(size_t n, size_t s);\nvoid free(void* ptr);",
-        "void* realloc(void* ptr, size_t size);",
-        "int memcmp(const void* a, const void* b, size_t n);",
-        "uint64_t hash(const uint8_t* data, size_t len);",
-        "for (int i = 0; i < n; i++) {",
-        "while (*p != '\\0') { *p = tolower(*p); p++; }",
-        "switch (type) {\n    case INT: return sizeof(int);\n    default: return 0;\n}",
-        "int pipe(int fd[2]);",
-        "ssize_t read(int fd, void* buf, size_t n);",
-        "ssize_t write(int fd, const void* buf, size_t n);",
-        # ── Rust ─────────────────────────────────────────────
-        "use std::collections::{HashMap, HashSet, VecDeque, BTreeMap, BinaryHeap};",
-        "use std::sync::{Arc, Mutex, RwLock, atomic::{AtomicUsize, Ordering}};",
-        "use std::path::{Path, PathBuf};",
-        "use std::io::{self, Read, Write, BufReader, BufWriter};",
-        "use serde::{Serialize, Deserialize};",
-        "use anyhow::{Result, Context, bail, ensure, anyhow};",
-        "use tokio::net::{TcpListener, TcpStream};",
-        "use tokio::sync::{mpsc, oneshot, broadcast, Semaphore};",
-        "pub fn new(config: Config) -> Self {",
-        "impl<T: Clone + Send + Sync + 'static> Worker<T> {",
-        "fn process(&mut self, data: &[u8]) -> Result<Vec<u8>> {",
-        "#[derive(Debug, Clone, Serialize, Deserialize)]",
-        "#[async_trait]",
-        "    .map(|x| x * 2).filter(|x| x > 0).collect::<Vec<_>>()",
-        "match result {\n    Ok(val) => val,\n    Err(e) => return Err(e.into()),\n}",
-        "if let Some(data) = cache.get(&key) {",
-        "fn main() -> Result<()> {",
-        "println!(\"Hello, {}!\", name);",
-        "eprintln!(\"Error: {}\", err);",
-        "panic!(\"unexpected state: {}\", state);",
-        "todo!(\"implement later\");",
-        "unimplemented!(\"not yet\");",
-        "unreachable!(\"should not happen\");",
-        # ── JavaScript / TypeScript ──────────────────────────
-        "import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';",
-        "import type { FC, PropsWithChildren, ReactNode } from 'react';",
-        "import express from 'express';",
-        "import { Router, Request, Response, NextFunction } from 'express';",
-        "import cors from 'cors';",
-        "import helmet from 'helmet';",
-        "const app = express();",
-        "app.use(express.json());",
-        "app.use(cors());",
-        "app.use(helmet());",
-        "app.get('/api/users', async (req: Request, res: Response) => {",
-        "interface User { id: number; name: string; email: string; }",
-        "type Result<T> = { ok: true; data: T } | { ok: false; error: string };",
-        "const fn = async (): Promise<void> => {",
-        "const result = await fetch('/api/data');",
-        "const json: User[] = await result.json();",
-        "console.log(`User: ${user.name}, Age: ${user.age}`);",
-        "export const App: FC = () => {",
-        "return <div className='container'>{children}</div>;",
-        "try { await doSomething(); } catch (err) { console.error(err); }",
-        "const [state, dispatch] = useReducer(reducer, initialState);",
-        "const ref = useRef<HTMLDivElement>(null);",
-        "const memoized = useMemo(() => compute(a, b), [a, b]);",
-        # ── Go ───────────────────────────────────────────────
-        "package main\nimport (\n    \"context\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"sync\"\n    \"time\"\n)",
-        "type Config struct {\n    Host string `json:\"host\" yaml:\"host\"`\n    Port int    `json:\"port\" yaml:\"port\"`\n}",
-        "func NewServer(cfg *Config) *Server {",
-        "func (s *Server) Handle(w http.ResponseWriter, r *http.Request) {",
-        "ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)",
-        "defer cancel()",
-        # ── SQL / DB ─────────────────────────────────────────
-        "SELECT id, name, email, created_at FROM users WHERE email LIKE '%@example.com' ORDER BY created_at DESC LIMIT 100;",
-        "INSERT INTO logs (user_id, action, timestamp) VALUES (?, ?, ?);",
-        "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);",
-        "ALTER TABLE users ADD COLUMN updated_at TIMESTAMP DEFAULT NOW();",
-        "BEGIN TRANSACTION;\nCOMMIT;\nROLLBACK;",
-        "SELECT COUNT(*), AVG(score), MAX(score), MIN(score) FROM results GROUP BY category;",
-        "DELETE FROM sessions WHERE expires_at < NOW();",
-        "UPDATE users SET last_login = NOW() WHERE id = ?;",
-        # ── Shell / DevOps ───────────────────────────────────
-        "#!/bin/bash\nset -euo pipefail",
-        "docker build -t app:latest .",
-        "docker run --rm -p 8080:8080 app:latest",
-        "kubectl apply -f deployment.yaml",
-        "git clone https://github.com/user/repo.git && cd repo && make -j$(nproc)",
-        "curl -X POST -H \"Content-Type: application/json\" -d '{\"key\":\"val\"}' https://api.example.com",
-        # ── YAML / Config / Markdown ─────────────────────────
-        "version: '3.8'\nservices:\n  app:\n    build: .\n    ports:\n      - \"8080:8080\"\n    environment:\n      - DATABASE_URL=postgres://localhost/mydb",
-        "debug: true\nlog_level: info\nmax_connections: 10\ntimeout_ms: 5000",
-        "# README\n## Installation\n```bash\npip install -r requirements.txt\n```\n## Usage\n```python\nfrom app import main\nmain()\n```",
-    ]
+# ═══════════════════════════════════════════════════════════════
+# Data Collection
+# ═══════════════════════════════════════════════════════════════
 
-def english_samples():
-    """25% — technical + natural English."""
-    return [
-        # ── Technical English ────────────────────────────────
-        "The transformer architecture uses self-attention mechanisms to process sequential data efficiently.",
-        "Gradient descent is an iterative optimization algorithm that finds the minimum of a loss function.",
-        "Each attention head projects the input into query, key, and value representations.",
-        "The model parameters are updated using backpropagation through the computational graph.",
-        "Mixed precision training uses both 16-bit and 32-bit floating point to reduce memory usage.",
-        "Layer normalization stabilizes training by normalizing activations across the feature dimension.",
-        "The feed-forward network consists of two linear transformations with a non-linear activation.",
-        "Dropout randomly zeros out neurons during training to prevent overfitting.",
-        "The learning rate scheduler adjusts the step size based on training progress.",
-        "Gradient clipping prevents exploding gradients by capping the norm of the gradient vector.",
-        "Data augmentation increases the effective size of the training dataset through transformations.",
-        "Batch normalization normalizes activations across the batch dimension for faster convergence.",
-        "The validation set is used to monitor performance on unseen data during training.",
-        "Transfer learning leverages knowledge from a pre-trained model for a new task.",
-        "The encoder processes the input sequence and generates a contextualized representation.",
-        "The decoder generates output tokens autoregressively based on the encoder's output.",
-        "Cross-entropy loss measures the difference between predicted and true distributions.",
-        "The embedding layer maps discrete tokens to continuous vector representations.",
-        "Positional encoding injects information about token positions into the input embeddings.",
-        "Early stopping halts training when validation performance stops improving.",
-        "Weight decay adds an L2 penalty to the loss function to encourage smaller weights.",
-        "The residual connection adds the input directly to the output of a sublayer.",
-        "The attention mechanism computes weighted sums of values based on query-key similarity.",
-        "Multilingual models like BERT and GPT handle dozens of languages simultaneously.",
-        "The compilation process transforms source code into machine-executable binary instructions.",
-        "Memory management in systems programming requires careful handling of allocation and deallocation.",
-        "Concurrent programming with threads and locks introduces challenges like deadlocks and race conditions.",
-        "Functional programming emphasizes immutability, pure functions, and declarative code over imperative style.",
-        "Version control systems like Git track changes to source code and enable collaborative development workflows.",
-        "Continuous integration automates the build, test, and deployment pipeline for software projects.",
-        "The operating system kernel manages hardware resources and provides system call interfaces to applications.",
-        "Database normalization reduces data redundancy and improves integrity through well-defined schema design.",
-        "Network protocols like TCP ensure reliable, ordered delivery of data between applications over IP networks.",
-        "Cryptographic hash functions produce fixed-size digests from arbitrary input with collision resistance.",
-        "Distributed consensus algorithms like Raft and Paxos enable fault-tolerant agreement across nodes.",
-        "Virtual machines and containers provide isolated execution environments for deploying applications.",
-        "Domain-specific languages offer specialized syntax and semantics tailored to particular problem domains.",
-        "Refactoring improves code structure without changing external behavior, enhancing maintainability.",
-        # ── Natural English ───────────────────────────────────
-        "The weather today is sunny with a light breeze blowing through the trees.",
-        "She walked to the store to buy groceries for the dinner party this evening.",
-        "Learning a new programming language takes time and patience but is rewarding.",
-        "The conference featured talks on artificial intelligence, cloud computing, and cybersecurity.",
-        "Please review the documentation before submitting your pull request for approval.",
-        "The project deadline has been extended by two weeks due to additional requirements.",
-        "Could you help me debug this issue? The function returns unexpected results sometimes.",
-        "Thank you for your contribution to the open source community. It is greatly appreciated.",
-        "The tutorial explains step by step how to build a complete web application from scratch.",
-        "I recommend using the latest version because it includes important security patches.",
-    ]
+def download_real_data(max_mb=20):
+    """Download real code + wiki text. Returns list of text lines."""
+    lines = []
+    
+    # ── CodeParrot (GitHub code) ──
+    try:
+        from datasets import load_dataset
+        print("  Downloading CodeParrot (streaming, ~10MB)...")
+        ds = load_dataset("codeparrot/codeparrot-clean", split="train", streaming=True, trust_remote_code=True)
+        count = 0
+        for row in ds:
+            code = row.get("content", "") or row.get("code", "") or ""
+            if not code: continue
+            for line in code.split("\n"):
+                line = line.strip()
+                if len(line) > 5 and len(line) < 500:
+                    lines.append(line)
+            count += 1
+            if count % 100 == 0:
+                mb = sum(len(l) for l in lines) / 1_000_000
+                if mb > max_mb / 2: break
+        print(f"    Got {len(lines):,} code lines (~{sum(len(l) for l in lines)/1_000_000:.1f}MB)")
+    except Exception as e:
+        print(f"    CodeParrot failed: {e}")
 
-def japanese_samples():
-    """15% — technical + natural Japanese."""
-    return [
-        # ── Technical Japanese ───────────────────────────────
-        "トランスフォーマーアーキテクチャは自己注意機構を用いて系列データを処理します。",
-        "深層学習モデルの学習には大規模なデータセットと高性能なGPUが必要です。",
-        "Pythonの非同期処理にはasyncioライブラリを使用します。",
-        "Rustの所有権システムはメモリ安全性をコンパイル時に保証します。",
-        "GitHubでプルリクエストを作成してコードレビューを依頼してください。",
-        "データベースのインデックスはB-tree構造を用いて高速な検索を実現します。",
-        "マイクロサービスアーキテクチャでは各サービスが独立してデプロイ可能です。",
-        "セキュリティ対策として入力値のバリデーションとサニタイズが重要です。",
-        "テスト駆動開発では最初にテストを書いてから実装を行います。",
-        "関数型プログラミングは副作用のない純粋関数を組み合わせてプログラムを構築します。",
-        "Dockerを使用することで開発環境の構築が大幅に簡略化されます。",
-        "Kubernetesはコンテナオーケストレーションツールとして広く使われています。",
-        "APIの設計ではバージョニングと後方互換性の維持が重要です。",
-        "機械学習モデルの評価には適合率と再現率のバランスが重要です。",
-        "分散システムではCAP定理に基づいて一貫性と可用性のトレードオフを考慮します。",
-        "並行処理ではミューテックスやセマフォを使って排他制御を行います。",
-        "正規表現は文字列のパターンマッチングに使用される強力なツールです。",
-        "オブジェクト指向設計では単一責任の原則に従ってクラスを分割します。",
-        "CI/CDパイプラインを構築することでコードの品質を自動的に検証できます。",
-        "エラーハンドリングには例外処理を用いて適切にエラーを捕捉します。",
-        "TypeScriptはJavaScriptに静的型付けを追加した言語です。",
-        "ReactはコンポーネントベースのUIライブラリです。",
-        "Gitのブランチ戦略としてGitHub FlowやGit Flowがよく使われます。",
-        "ロードバランサーはトラフィックを複数のサーバーに分散させます。",
-        "データベースの正規化はデータの冗長性を排除し整合性を保ちます。",
-        "キャッシュ戦略としてLRUやLFUなどのアルゴリズムが利用されます。",
-        "メモリリークは確保したメモリを解放し忘れることで発生する深刻な問題です。",
-        "デザインパターンは再利用可能な設計の雛形として広く認知されています。",
-        "テストコードのカバレッジは品質の指標として用いられますが過信は禁物です。",
-        "リファクタリングは外部の振る舞いを変えずに内部構造を改善する手法です。",
-        "モノレポとポリレポにはそれぞれメリットとデメリットが存在します。",
-        "認証にはセッションベースとトークンベースの二つの主要な方式があります。",
-        "コンパイラはソースコードを解析して最適化された機械語を生成します。",
-        "リンカは複数のオブジェクトファイルを結合して実行可能ファイルを作ります。",
-        "仮想記憶は物理メモリの不足を補うためにディスクをメモリとして使用する技術です。",
-        "並列処理と並行処理は似ていますが異なる概念として区別されています。",
-        "状態管理ライブラリはアプリケーションの複雑な状態を整理するのに役立ちます。",
-        "例外安全なコードを書くためにはRAIIイディオムの理解が不可欠です。",
-        "メタプログラミングを用いるとコードを生成するコードを書くことができます。",
-        "ベンチマークを取ることでパフォーマンスのボトルネックを特定できます。",
-        "シリアライズとデシリアライズはデータの永続化や通信に不可欠な処理です。",
-        "コマンドラインインターフェースは自動化やスクリプト処理に適しています。",
-        "依存関係の解決はパッケージマネージャの重要な役割の一つです。",
-        "単体テストと結合テストを組み合わせて総合的な品質保証を行います。",
-        "ログ出力は障害発生時の原因究明に不可欠な情報を提供します。",
-        "アクセシビリティに配慮したUIデザインはすべてのユーザーにとって重要です。",
-        "データレースは複数のスレッドが同期なしに共有データにアクセスする問題です。",
-        "プリフェッチは将来必要になるデータを事前に読み込んでおく最適化技法です。",
-        "JITコンパイルは実行時により最適なマシンコードを生成する技術です。",
-        "クラウドネイティブな設計では障害を前提とした回復力のあるシステムを構築します。",
-        # ── Natural Japanese ──────────────────────────────────
-        "今日はとても良い天気ですね。散歩に出かけるのにぴったりです。",
-        "先週末は友人と一緒に映画を観に行きました。とても面白かったです。",
-        "毎日の習慣として朝一番にコーヒーを飲むのが楽しみです。",
-        "この新しいプロジェクトに参加できて本当に嬉しく思います。",
-        "来月の発表会に向けて資料の準備を進めております。",
-        "お忙しいところ恐れ入りますが、ご確認いただけますと幸いです。",
-        "不明な点がございましたら、いつでもお気軽にお問い合わせください。",
-        "本日の会議では新機能の仕様について話し合う予定です。",
-        "週末はゆっくり休んで英気を養うことが大切だと思います。",
-        "子供の頃からコンピュータに興味があって、今はソフトウェアエンジニアです。",
-        "料理を作るのが趣味で、特にパスタ料理が得意です。",
-        "旅行が好きで、これまでに二十カ国以上を訪れました。",
-        "運動不足を解消するためにジムに通い始めました。",
-        "読書は新しい知識を得るための最も効率的な方法だと思います。",
-        "音楽を聴きながらコードを書くのが私の集中法です。",
-    ]
+    # ── Wikipedia English ──
+    try:
+        from datasets import load_dataset
+        print("  Downloading Wikipedia EN (streaming, ~5MB)...")
+        ds = load_dataset("wikipedia", "20220301.en", split="train", streaming=True, trust_remote_code=True)
+        count = 0
+        for row in ds:
+            text = row.get("text", "") or row.get("content", "") or ""
+            if not text: continue
+            for line in text.split("\n"):
+                line = line.strip()
+                if len(line) > 10 and len(line) < 1000:
+                    lines.append(line)
+            count += 1
+            if count > 200: break
+        print(f"    Total after wiki EN: {len(lines):,} lines")
+    except Exception as e:
+        print(f"    Wikipedia EN failed: {e}")
 
-def digit_samples():
-    """Number and identifier patterns."""
-    return [
-        "0 1 2 3 4 5 6 7 8 9 10 100 1000 10000",
-        "32 64 128 256 512 1024 2048 4096 8192 16384 65536",
-        "1e-3 1e-4 1e-5 3e-4 0.001 0.0001 0.00001",
-        "0.1 0.5 0.9 0.95 0.99 0.999",
-        "batch_size=32 lr=0.001 epochs=100",
-        "seq_len=1024 hidden_dim=2048 num_heads=16 num_layers=24",
-        "vocab_size=65536 max_position=8192",
-    ]
+    # ── Wikipedia Japanese ──
+    try:
+        from datasets import load_dataset
+        print("  Downloading Wikipedia JA (streaming, ~3MB)...")
+        ds = load_dataset("wikipedia", "20220301.ja", split="train", streaming=True, trust_remote_code=True)
+        count = 0
+        for row in ds:
+            text = row.get("text", "") or row.get("content", "") or ""
+            if not text: continue
+            for line in text.split("\n"):
+                line = line.strip()
+                if len(line) > 5 and len(line) < 1000:
+                    lines.append(line)
+            count += 1
+            if count > 150: break
+        print(f"    Total after wiki JA: {len(lines):,} lines")
+    except Exception as e:
+        print(f"    Wikipedia JA failed: {e}")
 
-def create_tokenizer(output_dir="tokenizer"):
-    """Build TinyLLM's GPT-2 x DeepSeek Coder x Japanese tokenizer."""
+    return lines
+
+
+def synthetic_corpus():
+    """Heavy synthetic corpus — used as fallback or supplement."""
+    random.seed(42)
+    lines = []
+    
+    # ── Code: generate many unique identifiers and patterns ──
+    py_kw = 'def class import from return yield async await if elif else for while break continue pass try except finally raise with as lambda True False None self super not and or in is'.split()
+    py_types = 'int float str bytes bool list dict tuple set Optional Union Any Callable Iterable Sequence Mapping TypeVar Generator Iterator Coroutine'.split()
+    py_libs = 'os sys json re math time datetime logging pathlib subprocess threading asyncio collections functools itertools dataclasses enum typing hashlib base64 uuid random string argparse numpy pandas torch flask fastapi pydantic sqlalchemy aiohttp httpx requests'.split()
+    c_types = 'int char float double void long unsigned short size_t ssize_t uint8_t uint16_t uint32_t uint64_t int8_t int16_t int32_t int64_t bool uintptr_t ptrdiff_t'.split()
+    rust_kw = 'fn struct enum impl trait pub use mod self mut ref let const static type dyn where async await match if else loop for while break continue return crate super'.split()
+    go_kw = 'func type var const import package struct interface map chan select defer go range fallthrough break continue return'.split()
+    js_kw = 'function const let var class extends import export default from async await return if else for while switch case break continue try catch throw new this super'.split()
+    
+    # Generate code lines: keyword + unique suffix
+    for i, kw in enumerate(py_kw * 800):
+        name = f"var_{i}_{random.randint(0,99999)}"
+        if kw in ('def',):
+            lines.append(f"{kw} {name}(x: {random.choice(py_types)}, y: {random.choice(py_types)} = None) -> {random.choice(py_types)}:")
+            lines.append(f"    return {name}_impl(x, y)")
+        elif kw in ('class',):
+            lines.append(f"{kw} {name}({random.choice(py_types)}):")
+            lines.append(f"    def __init__(self, value: {random.choice(py_types)}): self.value = value")
+        elif kw in ('import',):
+            lib = random.choice(py_libs)
+            lines.append(f"{kw} {lib}")
+            lines.append(f"from {lib} import {random.choice(py_kw[:20])}")
+        elif kw in ('for',):
+            lines.append(f"{kw} item in range({random.randint(0,1000)}): process(item)")
+        elif kw in ('if',):
+            lines.append(f"{kw} value > {random.randint(0,100)}: return {random.choice(['True','False']) if random.random()<0.5 else random.randint(0,999)}")
+        elif kw in ('try',):
+            lines.append(f"{kw}: result = await operation_{i}()")
+            lines.append(f"except Exception as e: logger.error(f'failed: {{e}}')")
+        elif kw in ('return',):
+            lines.append(f"{kw} {name} if {name} is not {random.choice(['None','False','0','[]'])} else default_value")
+        elif kw in ('with',):
+            lines.append(f"{kw} open(f'data_{i}.json') as f: payload = json.load(f)")
+        elif kw in ('async',):
+            lines.append(f"{kw} def handler_{i}(request: Request) -> Response:")
+        elif kw in ('yield',):
+            lines.append(f"{kw} from gen_{i}(data_{i})")
+        elif kw in ('assert',):
+            lines.append(f"{kw} isinstance(value_{i}, {random.choice(py_types)}), f'Expected {random.choice(py_types)}'")
+        elif kw in ('raise',):
+            lines.append(f"{kw} {random.choice(['ValueError','TypeError','RuntimeError','NotImplementedError'])}('{name} failed at step {i}')")
+        elif kw in ('lambda',):
+            lines.append(f"fn = {kw} x: x.{random.choice(['upper','lower','strip','split','replace','encode','decode'])}()")
+        else:
+            lines.append(f"    {kw} {name} = compute_{i}(input_{i})")
+    
+    # C lines
+    for i, t in enumerate(c_types * 200):
+        lines.append(f"{t} compute_{i}_{t}({t} x, const {t}* buf, size_t n) {{")
+        lines.append(f"    {t} acc = 0;")
+        lines.append(f"    for (size_t j = 0; j < n; j++) acc += buf[j];")
+        lines.append(f"    return acc;")
+        lines.append(f"}}")
+    
+    # Rust lines
+    for i, kw in enumerate(rust_kw * 400):
+        lines.append(f"{kw} {kw}_{i}_{random.randint(0,999)};")
+    
+    # Go lines
+    for i, kw in enumerate(go_kw * 500):
+        lines.append(f"{kw} {kw}_{i}_{random.randint(0,999)};")
+    
+    # JS lines
+    for i, kw in enumerate(js_kw * 400):
+        lines.append(f"{kw} {kw}_{i}_{random.randint(0,999)};")
+    
+    # ── English: varied templates with unique parameters ──
+    en_words = 'algorithm architecture system component function module library framework pipeline service deployment configuration authentication authorization encryption optimization performance scalability reliability availability maintainability latency throughput bandwidth overhead benchmark buffer cache compiler container database debug endpoint interface iteration kernel load middleware namespace parameter protocol query recursion repository schema semaphore serialization session specification synchronization tokenizer transaction validation variable virtualization vulnerability heuristic abstraction encapsulation inheritance polymorphism dependency concurrency parallelism asynchrony idempotency determinism'.split()
+    en_verbs = 'improved optimized refactored enhanced simplified redesigned overhauled streamlined restructured reorganized modernized upgraded extended integrated consolidated standardized'.split()
+    en_adjs = 'essential critical crucial vital fundamental important necessary significant valuable beneficial advantageous powerful robust flexible scalable efficient effective reliable secure maintainable extensible portable interoperable'.split()
+    
+    for i in range(50000):
+        w1, w2, w3 = random.sample(en_words, 3)
+        verb = random.choice(en_verbs)
+        adj = random.choice(en_adjs)
+        lines.append(f"The {w1} {w2} has been {verb} with {adj} {w3} in version {random.randint(1,20)}.{random.randint(0,99)}.")
+        lines.append(f"Proper {w1} implementation is {adj} for building {adj} {w2} systems.")
+        if i % 3 == 0:
+            lines.append(f"We need to {verb} the {w1} module to handle {w2} more {random.choice(['efficiently','effectively','securely','reliably'])}.")
+        if i % 5 == 0:
+            lines.append(f"Have you considered using {w1} instead of {w2} for the {w3} component?")
+        if i % 7 == 0:
+            lines.append(f"The integration of {w1} and {w2} requires careful {w3} management.")
+        if i % 11 == 0:
+            lines.append(f"Please review the {w1} documentation before proceeding with the {w2} deployment at {random.randint(1,12)}:{random.choice(['00','15','30','45'])} {random.choice(['AM','PM'])}.")
+    
+    # ── Japanese: varied templates ──
+    jp_nouns = 'アルゴリズム アーキテクチャ システム コンポーネント 機能 モジュール ライブラリ フレームワーク パイプライン サービス デプロイ 設定 認証 認可 暗号化 最適化 パフォーマンス スケーラビリティ 信頼性 可用性 保守性 レイテンシ スループット 帯域幅 オーバーヘッド ベンチマーク バッファ キャッシュ コンパイラ コンテナ データベース デバッグ エンドポイント インターフェース イテレーション カーネル ロード ミドルウェア 名前空間 パラメータ プロトコル クエリ 再帰 リポジトリ スキーマ セマフォ シリアライゼーション セッション 仕様 同期 トークナイザー トランザクション バリデーション 変数 仮想化 脆弱性 継承 カプセル化 ポリモーフィズム 依存性 並行性 並列性'.split()
+    jp_verbs = '改善 最適化 強化 簡素化 再設計 刷新 合理化 再構築 再編成 近代化 アップグレード 拡張 統合 統合化 標準化'.split()
+    
+    for i in range(30000):
+        w1, w2, w3 = random.sample(jp_nouns, 3)
+        verb = random.choice(jp_verbs)
+        lines.append(f"バージョン{random.randint(1,20)}.{random.randint(0,99)}において{w1}の{w2}が{verb}されました。")
+        lines.append(f"適切な{w1}の実装は{w2}システムの構築に不可欠です。")
+        if i % 4 == 0:
+            lines.append(f"先日の{w1}に関する会議で議論された{w2}について追加の確認をお願いします。")
+        if i % 6 == 0:
+            lines.append(f"{w1}と{w2}の統合には慎重な{w3}管理が求められます。")
+        if i % 9 == 0:
+            lines.append(f"新しい{w1}のリリースノートを確認しました。{w2}の改善が素晴らしいですね。")
+    
+    # ── Misc: paths, configs, commands ──
+    for i in range(10000):
+        lines.append(f"src/module_{i}/file_{i%100}.{random.choice(['py','js','ts','rs','go','c','h','json','yaml','md'])}")
+        lines.append(f"https://api.service_{i%50}.com/v{random.randint(1,3)}/endpoint_{i}")
+    
+    for i in range(5000):
+        lines.append(f"export VAR_{i}=value_{i}_{random.randint(1000,9999)}")
+        lines.append(f"--{random.choice(['config','output','input','format','debug','verbose','quiet','force','yes','no'])} value_{i}")
+    
+    return list(dict.fromkeys(lines))
+
+
+# ═══════════════════════════════════════════════════════════════
+# Tokenizer
+# ═══════════════════════════════════════════════════════════════
+
+def create_tokenizer(output_dir="tokenizer", vocab_size=32000):
     try:
         from tokenizers import Tokenizer, models, pre_tokenizers, decoders, trainers, processors
         from tokenizers.normalizers import NFKC
     except ImportError:
         print("pip install tokenizers")
-        return
+        return None
 
     os.makedirs(output_dir, exist_ok=True)
     print("=" * 60)
-    print("TinyLLM Custom Tokenizer — GPT-2 BPE x DeepSeek Coder x JP")
+    print(f"TinyLLM Tokenizer v7 — Target vocab={vocab_size:,}")
     print("=" * 60)
 
-    # GPT-2 style: ByteLevel BPE — no <unk>, any Unicode
     tok = Tokenizer(models.BPE(unk_token=None))
     tok.normalizer = NFKC()
     tok.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=True)
@@ -340,7 +231,6 @@ def create_tokenizer(output_dir="tokenizer"):
         special_tokens=[("<s>", 0), ("</s>", 1)],
     )
 
-    # DeepSeek Coder style special tokens
     special = [
         "<s>", "</s>", "<pad>", "<unk>",
         "<fim_prefix>", "<fim_suffix>", "<fim_middle>",
@@ -352,31 +242,50 @@ def create_tokenizer(output_dir="tokenizer"):
         "<|system|>", "<|user|>", "<|assistant|>",
     ]
 
-    # Corpus: 60% code + 25% en + 15% ja
-    print("Building corpus...")
-    corpus = []
-    cd = code_samples(); corpus.extend(cd * 80)
-    print(f"  Code: {len(cd)} x80 = {len(cd)*80}")
-    en = english_samples(); corpus.extend(en * 60)
-    print(f"  EN:   {len(en)} x60 = {len(en)*60}")
-    jp = japanese_samples(); corpus.extend(jp * 50)
-    print(f"  JP:   {len(jp)} x50 = {len(jp)*50}")
-    dg = digit_samples(); corpus.extend(dg * 20)
-    print(f"  Num:  {len(dg)} x20 = {len(dg)*20}")
-    print(f"  Total lines: ~{len(corpus)}")
+    # Build corpus
+    print("\nBuilding corpus...")
+    real = download_real_data()
+    synthetic = synthetic_corpus()
+    
+    corpus = real + synthetic
+    random.shuffle(corpus)
+    
+    total_chars = sum(len(l) for l in corpus)
+    print(f"  Real data:  {len(real):,} lines")
+    print(f"  Synthetic:  {len(synthetic):,} lines")
+    print(f"  Total:      {len(corpus):,} lines (~{total_chars/1_000_000:.1f}M chars)")
 
-    # Train BPE
-    print("Training vocab=65536 ...")
+    # For ByteLevel BPE to reach 32K, we need LOTS of repetition
+    # to make byte pairs frequent enough. Multiply corpus heavily.
+    multiplier = max(1, int(50_000_000 / max(total_chars, 1)))
+    multiplier = min(multiplier, 20)  # cap at 20x to avoid memory issues
+    if multiplier > 1:
+        corpus = corpus * multiplier
+        print(f"  Multiplier:  x{multiplier} → {len(corpus):,} lines (~{total_chars*multiplier/1_000_000:.1f}M chars)")
+
+    # If still too small, pad with single-char repetition
+    if total_chars * multiplier < 10_000_000:
+        print("  ⚠ Corpus too small for 32K — adding padding repetitions...")
+        extra = []
+        for line in corpus[:2000]:
+            extra.extend([line] * 20)
+        corpus.extend(extra)
+        print(f"  After padding: {len(corpus):,} lines")
+
+    # Train
+    print(f"\nTraining BPE (vocab={vocab_size:,}, min_freq=1)...")
     trainer = trainers.BpeTrainer(
-        vocab_size=65536, special_tokens=special,
+        vocab_size=vocab_size,
+        special_tokens=special,
         show_progress=True,
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
-        min_frequency=2,
+        min_frequency=1,
     )
     tok.train_from_iterator(corpus, trainer)
     tok.save(f"{output_dir}/tokenizer.json")
+    actual = tok.get_vocab_size()
 
-    # HF config files
+    # HF config
     added = {}
     for i, t in enumerate(special):
         added[str(i)] = {"content": t, "lstrip": False, "normalized": False,
@@ -402,12 +311,13 @@ def create_tokenizer(output_dir="tokenizer"):
         json.dump(smap, f, indent=2, ensure_ascii=False)
 
     kb = sum(os.path.getsize(f"{output_dir}/{f}") for f in os.listdir(output_dir)) / 1024
-    print(f"\nDone! {kb:.0f} KB, vocab={tok.get_vocab_size()}")
+    print(f"\n✅ Done! {kb:.0f} KB, vocab={actual:,} / {vocab_size:,}")
+    if actual < vocab_size * 0.8:
+        print(f"⚠ Only reached {actual/vocab_size:.0%} of target. Need more data variety.")
     return tok
 
 
 def test_tokenizer(output_dir="tokenizer"):
-    """Test tokenizer quality. Requires: pip install transformers"""
     try:
         from transformers import AutoTokenizer
     except ImportError:
@@ -415,31 +325,40 @@ def test_tokenizer(output_dir="tokenizer"):
         return
     tok = AutoTokenizer.from_pretrained(output_dir, use_fast=True)
     tests = [
-        ("Python", "def quick_sort(arr):\n    if len(arr) <= 1:\n        return arr\n    pivot = arr[len(arr) // 2]\n    left = [x for x in arr if x < pivot]\n    return quick_sort(left) + [pivot] + quick_sort([x for x in arr if x > pivot])"),
-        ("C", "int factorial(int n) { if (n <= 1) return 1; return n * factorial(n - 1); }"),
-        ("JS", "const add = (a,b) => a + b;\nconst r = [1,2,3].map(x => x*2).filter(x => x>3);"),
-        ("Rust", "fn gcd(mut a: u64, mut b: u64) -> u64 { while b != 0 { let t = b; b = a % b; a = t; } a }"),
-        ("EN", "The transformer model uses multi-head attention with scaled dot-product similarity."),
-        ("JP", "トランスフォーマーモデルは自己注意機構を用いて文脈を理解します。"),
-        ("SQL", "SELECT u.name, COUNT(o.id) FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id;"),
-        ("FIM", "<fim_prefix>def binary_search(arr, target):<fim_suffix>    return -1<fim_middle>"),
+        ("Python-algo", "def binary_search(arr: list[int], target: int) -> int:\n    lo, hi = 0, len(arr) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if arr[mid] == target: return mid\n        elif arr[mid] < target: lo = mid + 1\n        else: hi = mid - 1\n    return -1"),
+        ("C-func", "#include <stdio.h>\nint factorial(int n) { return n <= 1 ? 1 : n * factorial(n - 1); }\nint main(void) { printf(\"%d\\n\", factorial(5)); return 0; }"),
+        ("JS-React", "import { useState, useEffect } from 'react';\nconst Counter: FC = () => {\n  const [count, setCount] = useState(0);\n  useEffect(() => { document.title = `Count: ${count}`; }, [count]);\n  return <button onClick={() => setCount(c => c + 1)}>+1</button>;\n};"),
+        ("Rust-srv", "use tokio::net::TcpListener;\n#[tokio::main]\nasync fn main() -> Result<()> {\n    let listener = TcpListener::bind(\"0.0.0.0:8080\").await?;\n    loop {\n        let (stream, addr) = listener.accept().await?;\n        tokio::spawn(async move { handle(stream).await });\n    }\n}"),
+        ("Go-srv", "func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {\n    w.Header().Set(\"Content-Type\", \"application/json\")\n    if r.Method != http.MethodGet {\n        http.Error(w, \"not allowed\", 405)\n        return\n    }\n}"),
+        ("SQL", "SELECT u.name, COUNT(o.id) FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.active = true GROUP BY u.id HAVING COUNT(o.id) > 5 ORDER BY COUNT(o.id) DESC LIMIT 10;"),
+        ("EN-tech", "The transformer architecture employs multi-head self-attention with scaled dot-product similarity to process sequences in parallel."),
+        ("EN-chat", "Hey, I'm debugging an issue with the authentication middleware — could you take a quick look when you have a moment?"),
+        ("JP-tech", "トランスフォーマーモデルは自己注意機構を用いて文脈を理解し、高精度なテキスト生成を実現します。"),
+        ("JP-chat", "お疲れ様です。先日のバグ修正について確認したいことがあるのですが、今お時間よろしいでしょうか。"),
+        ("Config", "DATABASE_URL=postgresql://user:password@localhost:5432/mydb\nREDIS_URL=redis://localhost:6379\nJWT_SECRET=super-secret-value-change-me-in-production"),
+        ("Shell", "docker build -t myapp:latest . && docker push registry.example.com/myapp:latest && kubectl apply -f k8s/deployment.yaml"),
+        ("FIM", "<fim_prefix>def quick_sort(arr):<fim_suffix>    return arr<fim_middle>    if len(arr) <= 1: return arr\n    pivot = arr[0]\n    left = [x for x in arr[1:] if x <= pivot]\n    right = [x for x in arr[1:] if x > pivot]\n    return quick_sort(left) + [pivot] + quick_sort(right)"),
+        ("Unicode", "こんにちは世界！🚀 Hello 世界 🌍 Привет мир 日本語 한국어 中文 ✨ αβγ ∑∫ √∞"),
     ]
-    print("="*60)
-    print("Quality Tests")
-    print("="*60)
+    print("=" * 80)
+    print(f"{'Test':12s} {'Chars':>5} {'Tokens':>6} {'Ratio':>6}  Sample")
+    print("=" * 80)
     for label, text in tests:
         ids = tok.encode(text)
-        ratio = len(ids) / len(text)
+        ratio = len(ids) / max(len(text), 1)
         pieces = [tok.decode([i]) for i in ids[:4]]
-        print(f"  [{label:5s}] {len(text):3d} chars -> {len(ids):3d} tokens ({ratio:.2f}x)  {' '.join(pieces[:4])}")
-    print(f"  Vocab: {tok.vocab_size}  |  ByteLevel: yes  |  FIM: yes  |  JP: yes")
-    print("="*60)
+        print(f"  {label:10s}  {len(text):5d}  {len(ids):6d}  {ratio:5.2f}x  {' | '.join(pieces)}")
+    print("=" * 80)
+    print(f"  Vocab: {tok.vocab_size:,}  |  ByteLevel BPE  |  FIM  |  Code×EN×JP")
+    print("=" * 80)
+
 
 if __name__ == '__main__':
-    p = argparse.ArgumentParser()
-    p.add_argument('--test', action='store_true')
-    p.add_argument('--output', default='tokenizer')
+    p = argparse.ArgumentParser(description='TinyLLM Tokenizer v7')
+    p.add_argument('--test', action='store_true', help='Test after building')
+    p.add_argument('--output', default='tokenizer', help='Output directory')
+    p.add_argument('--vocab', type=int, default=32000, help='Target vocab size')
     args = p.parse_args()
-    create_tokenizer(args.output)
+    create_tokenizer(args.output, args.vocab)
     if args.test:
         test_tokenizer(args.output)

@@ -26,10 +26,13 @@ tl_infer_t *tl_infer_create(tl_model_t *model, tl_tokenizer_t *tok, tl_sampler_t
     int D = model->hidden_dim;
     int V = model->vocab_size;
 
-    /* Allocate scratch buffers */
+    /* Allocate scratch buffers
+     * MLA workspace needs: 4*H*d + L + TL_MAX_SEQ_LEN ≈ 14K floats
+     * Layer wrapper adds 7*D = 7K.  Model forward adds 2*D = 2K.
+     * Total: ~23K floats.  Use D * 24 as safe margin. */
     inf->hidden_buf    = tl_alloc(D * TL_MAX_BATCH_SIZE * sizeof(float));
     inf->logits_buf    = tl_alloc(V * TL_MAX_BATCH_SIZE * sizeof(float));
-    inf->attn_buf      = tl_alloc(D * 16 * sizeof(float)); /* generous */
+    inf->attn_buf      = tl_alloc(D * 24 * sizeof(float)); /* was D*16, too small for MLA */
     inf->ffn_buf       = tl_alloc(V * sizeof(float));       /* for sampling */
     inf->expert_scores = tl_alloc(model->total_experts * sizeof(float));
 
@@ -38,9 +41,12 @@ tl_infer_t *tl_infer_create(tl_model_t *model, tl_tokenizer_t *tok, tl_sampler_t
     inf->generated    = tl_alloc(TL_MAX_SEQ_LEN * sizeof(tl_token_t));
     inf->gen_len      = 0;
 
-    /* KV cache */
+    /* KV cache — use model's actual latent dim, not compile-time default */
+    int kv_latent = TL_KV_LATENT_DIM;
+    if (model->n_layers > 0 && model->layers[0].mla.latent_dim > 0)
+        kv_latent = model->layers[0].mla.latent_dim;
     inf->kv_cache = tl_kv_cache_create(model->n_layers, TL_MAX_CACHE_TOKENS,
-                                       TL_KV_LATENT_DIM);
+                                       kv_latent);
 
     /* Scratchpad */
     inf->scratchpad     = tl_alloc(TL_MAX_SCRATCH_TOKENS * 16);

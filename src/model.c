@@ -196,7 +196,10 @@ static int gguf_meta_int(gguf_ctx_t *ctx, const char *key, int def) {
     for (int i = 0; i < ctx->n_meta_parsed; i++)
         if (strcmp(ctx->meta[i].key, key) == 0)
             return (int)(ctx->meta[i].type == GGUF_TYPE_U32 ? ctx->meta[i].u32 :
-                         ctx->meta[i].type == GGUF_TYPE_I32 ? ctx->meta[i].i32 : def);
+                         ctx->meta[i].type == GGUF_TYPE_I32 ? ctx->meta[i].i32 :
+                         ctx->meta[i].type == GGUF_TYPE_U64 ? ctx->meta[i].u64 :
+                         ctx->meta[i].type == GGUF_TYPE_I64 ? ctx->meta[i].u64 :
+                         def);
     return def;
 }
 
@@ -223,7 +226,7 @@ tl_model_t *tl_model_load(const char *path) {
     /* Dimensions from metadata */
     m->hidden_dim   = gguf_meta_int(ctx, "llm.hidden_size", 2048);
     m->n_layers     = gguf_meta_int(ctx, "llm.block_count", 32);
-    m->vocab_size   = gguf_meta_int(ctx, "llm.context_length", 32000);
+    m->vocab_size   = gguf_meta_int(ctx, "llm.vocab_size", 32000);
     m->max_seq_len  = gguf_meta_int(ctx, "llm.context_length", TL_MAX_SEQ_LEN);
 
     /* MoE detection */
@@ -234,6 +237,19 @@ tl_model_t *tl_model_load(const char *path) {
     tl_log("  hidden_dim=%d, layers=%d, vocab=%d, seq_len=%d",
            m->hidden_dim, m->n_layers, m->vocab_size, m->max_seq_len);
     if (n_experts > 0) tl_log("  MoE: %d experts, %d MoE layers", n_experts, n_moe_layers);
+
+    /* ── Derive attention dimensions ────────────────────────────────── */
+    int n_heads     = gguf_meta_int(ctx, "llm.head_count", 16);
+    int head_dim    = gguf_meta_int(ctx, "llm.head_dim", m->hidden_dim / n_heads);
+    int kv_latent   = gguf_meta_int(ctx, "llm.kv_latent_dim", m->hidden_dim);
+    float rope_theta = 10000.0f;
+    for (int i = 0; i < ctx->n_meta_parsed; i++) {
+        if (strstr(ctx->meta[i].key, "rope_theta") && ctx->meta[i].type == GGUF_TYPE_F32)
+            rope_theta = ctx->meta[i].f32;
+    }
+
+    tl_log("  attention: %d heads × %d dim, kv_latent=%d, rope_theta=%.0f",
+           n_heads, head_dim, kv_latent, rope_theta);
 
     /* Load embeddings */
     int tid;
@@ -324,6 +340,31 @@ tl_model_t *tl_model_load(const char *path) {
             snprintf(name, sizeof(name), "blk.%d.ffn_down.weight", l);
             tid = gguf_find_tensor(ctx, name);
             if (tid >= 0) gguf_load_tensor(ctx, tid, &ly->ffn.dense.w_down);
+        }
+
+        /* ── Initialize MLA dimensions for this layer ──────────────── */
+        ly->mla.hidden_dim  = m->hidden_dim;
+        ly->mla.n_heads     = n_heads;
+        ly->mla.head_dim    = head_dim;
+        ly->mla.latent_dim  = kv_latent;
+        ly->mla.rope_theta  = rope_theta;
+        tl_rope_precompute(&ly->mla);  /* ← init RoPE frequencies! */
+
+        /* ── Initialize FFN dimensions ────────────────────────────── */
+        if (ly->is_moe) {
+            int inter = ly->ffn.moe.experts[0].w_gate.rows;
+            ly->ffn.moe.hidden_dim = m->hidden_dim;
+            ly->ffn.moe.inter_dim  = inter;
+            ly->ffn.moe.gate.n_experts = n_experts;
+            ly->ffn.moe.gate.n_active  = TL_MAX_ACTIVE_EXPERTS;
+            for (int e = 0; e < n_experts; e++) {
+                ly->ffn.moe.experts[e].hidden_dim = m->hidden_dim;
+                ly->ffn.moe.experts[e].inter_dim  = inter;
+            }
+        } else {
+            int inter = ly->ffn.dense.w_gate.rows;
+            ly->ffn.dense.hidden_dim = m->hidden_dim;
+            ly->ffn.dense.inter_dim  = inter;
         }
     }
 

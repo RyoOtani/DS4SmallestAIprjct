@@ -339,6 +339,7 @@ void        tl_rms_norm(const float *x, const float *w, float *y,
                         int dim, float eps);
 tl_kv_cache_t *tl_kv_cache_create(int n_layers, int max_tokens, int latent_dim);
 void          tl_kv_cache_free(tl_kv_cache_t *c);
+void          tl_rope_precompute(tl_mla_t *mla);
 
 /* ═══════════════════════════════════════════════════════════════════
    API: Lifecycle
