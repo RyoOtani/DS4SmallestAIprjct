@@ -38,8 +38,8 @@ VOCAB_SIZE = 4639
 
 TRAIN_CONFIG = {
     'max_steps': 5000,      # Override with --steps
-    'batch_size': 2,
-    'grad_accum': 8,
+    'batch_size': 1,        # Kaggle T4: 1 to avoid OOM with DataParallel
+    'grad_accum': 4,        # effective batch = batch_size × grad_accum × gpus = 8
     'learning_rate': 3e-4,
     'warmup_steps': 100,
     'max_lr': 3e-4,
@@ -48,6 +48,7 @@ TRAIN_CONFIG = {
     'grad_clip': 1.0,
     'log_interval': 10,
     'save_interval': 500,
+    'gradient_checkpointing': True,  # trades compute for VRAM (~30% less memory)
 }
 
 DATA_CONFIG = {
@@ -285,6 +286,33 @@ def _log_moe_metrics(model, gpu_count):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Safe Save (avoids Kaggle zip serialization crash)
+# ═══════════════════════════════════════════════════════════════
+
+def safe_save(obj, path, max_retries=3):
+    """Save PyTorch checkpoint safely, avoiding Kaggle zip-stream corruption.
+    
+    Uses legacy serialization (_use_new_zipfile_serialization=False) and
+    writes to a temp file first, then atomically renames. Retries on failure.
+    """
+    import tempfile
+    tmp_path = path + '.tmp'
+    for attempt in range(max_retries):
+        try:
+            torch.save(obj, tmp_path, _use_new_zipfile_serialization=False)
+            os.replace(tmp_path, path)  # atomic on POSIX
+            return True
+        except RuntimeError as e:
+            print(f"⚠️  Save attempt {attempt+1}/{max_retries} failed: {e}")
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(2)
+    return False
+
+
+# ═══════════════════════════════════════════════════════════════
 # Training
 # ═══════════════════════════════════════════════════════════════
 
@@ -299,6 +327,22 @@ def train(model, optimizer, scheduler, scaler, train_loader,
     if gpu_count > 1:
         model = nn.DataParallel(model)
         print(f"🚀 DataParallel: {gpu_count} GPUs")
+
+    # Enable gradient checkpointing to save VRAM (~30% reduction)
+    if train_config.get('gradient_checkpointing', False):
+        from torch.utils.checkpoint import checkpoint
+        base_model = model.module if gpu_count > 1 else model
+        for layer in base_model.layers:
+            layer._gradient_checkpointing = True
+            # Wrap forward with checkpoint
+            original_forward = layer.forward
+            def make_ckpt_forward(layer_obj):
+                def ckpt_forward(x):
+                    return checkpoint(layer_obj._original_forward, x, use_reentrant=False)
+                return ckpt_forward
+            layer._original_forward = original_forward
+            layer.forward = make_ckpt_forward(layer)
+        print(f"🧠 Gradient checkpointing: ON (VRAM ↓)")
 
     data_iter = iter(train_loader)
     global_step = start_step
@@ -367,7 +411,7 @@ def train(model, optimizer, scheduler, scaler, train_loader,
                 'config': cfg_dict,
                 'step': global_step,
             }
-            torch.save(ckpt, f'{ckpt_dir}/model.pt')
+            safe_save(ckpt, f'{ckpt_dir}/model.pt')
             print(f"💾 Saved: {ckpt_dir}/")
 
     elapsed = time.time() - start_time
@@ -475,7 +519,7 @@ def main():
     final_dir = f'{OUTPUT_DIR}/final'
     os.makedirs(final_dir, exist_ok=True)
     final_model = model.module if hasattr(model, 'module') else model
-    torch.save({
+    safe_save({
         'model_state_dict': final_model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'config': cfg_dict,

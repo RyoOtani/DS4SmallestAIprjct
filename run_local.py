@@ -159,6 +159,9 @@ def load_model(model_dir):
     else:
         state_dict = ckpt
 
+    # Strip 'module.' prefix (from DDP/FSDP training)
+    state_dict = {k.removeprefix('module.'): v for k, v in state_dict.items()}
+
     model.load_state_dict(state_dict, strict=False)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"✅ Loaded! ~{total_params/1e9:.2f}B params, {cfg['num_hidden_layers']} layers")
