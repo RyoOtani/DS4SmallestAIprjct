@@ -112,21 +112,19 @@ int tl_tokenize(tl_tokenizer_t *t, const char *text, tl_token_t *tokens, int max
     int n_ids = 0;
 
     for (int i = 0; i < text_len; i++) {
-        /* Look up byte as UTF-8 continuation handling */
         uint8_t b = (uint8_t)text[i];
 
-        /* Simple: treat each byte as a base token.
-           Real BPE uses a pre-tokenizer (regex/unicode). */
-        if (b < 128) {
-            ids[n_ids++] = (tl_token_t)b + 3;  /* offset for special tokens */
-        } else {
-            /* Multi-byte: just use byte value as token for now */
-            ids[n_ids++] = (tl_token_t)b + 259;
-        }
+        /* Byte-level BPE: every byte maps to a dedicated token.
+           IDs 0-2 are specials (<s>, </s>, <pad>).
+           IDs 3-258 are byte tokens (0x00-0xFF).
+           This is the standard GPT-2 byte-level scheme. */
+        ids[n_ids++] = (tl_token_t)b + 3;
 
         if (n_ids >= cap - 2) {
             cap *= 2;
-            ids = realloc(ids, cap * sizeof(tl_token_t));
+            tl_token_t *new_ids = realloc(ids, cap * sizeof(tl_token_t));
+            if (!new_ids) { tl_free(ids); return 0; }  /* OOM */
+            ids = new_ids;
         }
     }
 
@@ -155,11 +153,13 @@ int tl_tokenize(tl_tokenizer_t *t, const char *text, tl_token_t *tokens, int max
         }
 
         if (best_i >= 0) {
-            /* Apply merge: replace (a, b) with merged token */
-            /* The merged token ID is: vocab_size lookup...
-               For simplicity, we assign merge rank as token id
-               (in real impl, the merge produces a specific token) */
+            /* Apply merge: replace (a, b) with merged token.
+               WARNING: Dummy tokenizer — merge table is empty.
+               Real GGUF tokenizer would use correct token IDs. */
             tl_token_t new_token = (tl_token_t)(t->vocab_size - 1 - best_rank);
+            /* Boundary check: ensure token ID is within valid range */
+            if (new_token < 0) new_token = 0;
+            if (new_token >= t->vocab_size) new_token = (tl_token_t)(t->vocab_size - 1);
 
             ids[best_i] = new_token;
             /* Shift left */
@@ -260,7 +260,9 @@ tl_tokenizer_t *tl_tokenizer_load(const char *path) {
     t->bos_id = 0;  t->vocab[0] = strdup("<s>");
     t->eos_id = 1;  t->vocab[1] = strdup("</s>");
     t->pad_id = 2;  t->vocab[2] = strdup("<pad>");
-    t->unk_id = 3;  t->vocab[3] = strdup("<unk>");
+    /* <unk> at ID 259 (after byte tokens 3..258), NOT 3 to avoid
+       conflict with byte token 0x00 which also maps to ID 3. */
+    t->unk_id = 259;  t->vocab[259] = strdup("<unk>");
 
     t->fim_prefix_id = 500; t->vocab[500] = strdup("<fim_prefix>");
     t->fim_suffix_id = 501; t->vocab[501] = strdup("<fim_suffix>");
@@ -276,12 +278,20 @@ tl_tokenizer_t *tl_tokenizer_load(const char *path) {
     return t;
 }
 
+/* ── Recursive trie free ──────────────────────────────────────────── */
+static void trie_free_node(struct tl_trie_node *node) {
+    if (!node) return;
+    for (int i = 0; i < 256; i++)
+        trie_free_node(node->children[i]);
+    tl_free(node);
+}
+
 void tl_tokenizer_free(tl_tokenizer_t *t) {
     if (!t) return;
     tl_free(t->merges);
     for (int i = 0; i < t->vocab_size; i++) tl_free(t->vocab[i]);
     tl_free(t->vocab);
-    tl_free(t->trie_root); /* TODO: recursive trie free */
+    trie_free_node(t->trie_root);
     tl_free(t->encode_cache);
     tl_free(t);
 }
