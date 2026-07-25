@@ -170,7 +170,11 @@ class MoELayer(nn.Module):
         self.n_active = n_active
         
         # Router gate
-        self.gate = MoEGate(hidden_dim, n_experts, n_active, capacity_factor, dtype)
+        self.gate = MoEGate(
+            hidden_dim, n_experts, n_active,
+            capacity_factor=capacity_factor,
+            dtype=dtype
+        )
         
         # Expert FFNs
         self.experts = nn.ModuleList([
@@ -206,54 +210,57 @@ class MoELayer(nn.Module):
         
         # 1. Route tokens to experts
         topk_indices, topk_weights, aux_loss = self.gate(tokens)
+        # topk_indices: [tokens, k], topk_weights: [tokens, k]
         
-        # 2. Capacity enforcement (per expert)
-        # Each expert can process at most `capacity` tokens.
-        # Overflow tokens are rerouted to their next-best expert (top-2 → top-1 fallback).
+        # 2. Capacity enforcement
         capacity = max(1, int(math.ceil(self.gate.capacity_factor * n_tokens / self.n_experts)))
         
-        # 3. Dispatch and compute with capacity
+        # 3. Optimized dispatch: group tokens by expert, process in batches
+        #    Instead of O(k * n_experts) double loop, we:
+        #    a) Flatten (token, k) → single dispatch list
+        #    b) Group by expert_id
+        #    c) Process each expert's batch in one forward call
+        #    d) Scatter-add weighted outputs back
+        
         output = torch.zeros_like(tokens)
-        overflow_mask = torch.ones(n_tokens, dtype=torch.bool, device=tokens.device)
         
-        for k in range(self.n_active):
-            expert_ids = topk_indices[:, k]  # [B*T]
-            weights = topk_weights[:, k].unsqueeze(-1)  # [B*T, 1]
+        # Build flat dispatch: for each (token, k_rank), record expert + weight
+        token_idx = torch.arange(n_tokens, device=tokens.device).unsqueeze(1).expand(-1, self.n_active)
+        # token_idx: [tokens, k] — original token position
+        
+        # Sort by expert_id for grouped processing
+        flat_experts = topk_indices.reshape(-1)        # [tokens * k]
+        flat_weights = topk_weights.reshape(-1)         # [tokens * k]
+        flat_tokens  = token_idx.reshape(-1)            # [tokens * k]
+        
+        # For each expert, gather all tokens routed to it
+        for eid in range(self.n_experts):
+            expert_mask = (flat_experts == eid)
+            n_routed = expert_mask.sum().item()
+            if n_routed == 0:
+                continue
             
-            for eid in range(self.n_experts):
-                mask = (expert_ids == eid) & overflow_mask
-                n_selected = mask.sum().item()
-                if n_selected == 0:
-                    continue
-                
-                # 🔄 Capacity enforcement: drop tokens beyond capacity
-                if n_selected > capacity:
-                    # Keep only the first `capacity` tokens (by order in batch)
-                    selected_indices = torch.where(mask)[0]
-                    keep_indices = selected_indices[:capacity]
-                    drop_indices = selected_indices[capacity:]
-                    
-                    # Mark dropped tokens for reroute
-                    mask[drop_indices] = False
-                    # These tokens will be picked up by next k (next-best expert)
-                
-                expert_out = self.experts[eid](tokens[mask])
-                output[mask] += expert_out * weights[mask]
-                overflow_mask[mask] = False  # mark as processed
+            # Capacity enforcement
+            if n_routed > capacity:
+                # Keep first `capacity` tokens, drop rest
+                keep = torch.where(expert_mask)[0][:capacity]
+                expert_mask = torch.zeros_like(expert_mask)
+                expert_mask[keep] = True
+                n_routed = capacity
+            
+            # Gather tokens for this expert
+            tok_indices = flat_tokens[expert_mask]       # [n_routed]
+            tok_weights = flat_weights[expert_mask]      # [n_routed]
+            expert_input = tokens[tok_indices]            # [n_routed, D]
+            
+            # Single batched forward for all tokens routed to this expert
+            expert_output = self.experts[eid](expert_input)  # [n_routed, D]
+            
+            # Weight and scatter-add back
+            weighted = expert_output * tok_weights.unsqueeze(-1)
+            output.index_add_(0, tok_indices, weighted)
         
-        # 4. Handle residual tokens (exceeded all capacity)
-        # Route them uniformly across all shared experts or pass through
-        if overflow_mask.any():
-            # Simple fallback: average of all experts for overflow tokens
-            residual = tokens[overflow_mask]
-            if self.n_shared > 0:
-                fallback = sum(exp(residual) for exp in self.shared_experts) / self.n_shared
-            else:
-                # Identity-ish pass-through (just a tiny transform)
-                fallback = residual * 0.99
-            output[overflow_mask] += fallback
-        
-        # 5. Shared experts (always active)
+        # 4. Shared experts (always active)
         if self.n_shared > 0:
             shared_out = sum(exp(tokens) for exp in self.shared_experts) / self.n_shared
             output = output + shared_out
