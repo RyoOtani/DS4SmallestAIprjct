@@ -91,6 +91,11 @@ def align_file(f, alignment=GGUF_ALIGNMENT):
 # ═══════════════════════════════════════════════════════════════════
 # Model class (must match the notebook's Cell 11)
 # ═══════════════════════════════════════════════════════════════════
+#
+# NOTE: These classes are used ONLY for weight export to GGUF.
+# The forward() raises NotImplementedError by design — inference
+# happens in the C runtime, not in Python.
+# Use test_forward() for basic structure verification.
 
 class TinyLLMLayer(torch.nn.Module):
     def __init__(self, cfg):
@@ -108,7 +113,25 @@ class TinyLLMLayer(torch.nn.Module):
         self.down_proj = torch.nn.Linear(inter, D, bias=False)
 
     def forward(self, x):
-        raise NotImplementedError("Export only")
+        """Export-only skeleton. For inference, use C runtime or notebook model."""
+        raise NotImplementedError("Export only — use C runtime for inference")
+
+    def test_forward(self, x):
+        """Verify model structure works (for testing only)."""
+        residual = x
+        x = self.norm1(x)
+        B, S, D = x.shape
+        n_heads = D // 64  # head_dim = 64 by default
+        head_dim = D // n_heads
+        q = self.q_proj(x).view(B, S, n_heads, head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(B, S, n_heads, head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(B, S, n_heads, head_dim).transpose(1, 2)
+        a = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)
+        x = self.o_proj(a.transpose(1, 2).contiguous().view(B, S, D)) + residual
+        residual = x
+        x = self.norm2(x)
+        x = self.down_proj(torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)) + residual
+        return x
 
 
 class TinyLLMModel(torch.nn.Module):
@@ -122,7 +145,17 @@ class TinyLLMModel(torch.nn.Module):
         self.lm_head = torch.nn.Linear(cfg['hidden_size'], cfg['vocab_size'], bias=False)
 
     def forward(self, x):
-        raise NotImplementedError("Export only")
+        """Export-only skeleton. For inference, use C runtime or notebook model."""
+        raise NotImplementedError("Export only — use C runtime for inference")
+
+    def test_forward(self, input_ids):
+        """Verify full model structure works (for testing only)."""
+        x = self.embed(input_ids)
+        for layer in self.layers:
+            x = layer.test_forward(x)
+        x = self.norm(x)
+        logits = self.lm_head(x)
+        return {'logits': logits}
 
 
 # ═══════════════════════════════════════════════════════════════════

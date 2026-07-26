@@ -36,3 +36,4 @@ code_index/*.jsonl
 # Environment
 .env
 downloaded_models/
+demo-tinyllm-*/
