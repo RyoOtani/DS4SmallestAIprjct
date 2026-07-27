@@ -102,8 +102,12 @@ void tl_mla_forward(const tl_mla_t *mla, const float *hidden,
     float *kv_latent = workspace + H * d;           /* [L]              */
     float *k_full = workspace + H * d + L;          /* [H * d]          */
     float *v_full = workspace + H * d + L + H * d;  /* [H * d]          */
-    float *attn_scores = workspace + H * d + L + H * d * 2; /* [seq]   */
-    float *attn_out = workspace + H * d + L + H * d * 2 + TL_MAX_SEQ_LEN; /* [H*d] */
+    float *attn_out = workspace + H * d + L + H * d * 2; /* [H*d]       */
+
+    /* ★ attn_scores allocated dynamically based on actual seq_len      */
+    int seq_len = MIN(position + 1, kv_cache->max_len);
+    float *attn_scores = tl_alloc(seq_len * sizeof(float));
+    if (!attn_scores) return; /* allocation failed */
 
     /* 1. Compute Q: q_full = W_q @ hidden                              */
     tl_matvec(&mla->w_q, hidden, q_full, H * d, D);
@@ -132,7 +136,6 @@ void tl_mla_forward(const tl_mla_t *mla, const float *hidden,
                                              shared-latent variant. */
 
     /* 6. Scaled dot-product attention over cached keys                   */
-    int seq_len = MIN(position + 1, kv_cache->max_len);
     int seq_start = (position + 1 > kv_cache->max_len) ? (position + 1 - kv_cache->max_len) : 0;
 
     float scale = 1.0f / sqrtf((float)d);
@@ -199,6 +202,8 @@ void tl_mla_forward(const tl_mla_t *mla, const float *hidden,
 
     /* 7. Output projection: output = W_o @ attn_out                      */
     tl_matvec(&mla->w_o, attn_out, output, D, H * d);
+
+    tl_free(attn_scores);
 }
 
 /* ═══════════════════════════════════════════════════════════════════

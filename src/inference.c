@@ -176,6 +176,7 @@ int tl_generate(tl_infer_t *inf, const tl_token_t *prompt, int prompt_len,
     inf->gen_len = prompt_len;
 
     tl_token_t eos = inf->tokenizer->eos_id;
+    fprintf(stderr, "🔄 generation loop start (eos=%d)\n", eos);
 
     int step = 0;
     while (step < max_new_tokens) {
@@ -216,7 +217,9 @@ int tl_generate(tl_infer_t *inf, const tl_token_t *prompt, int prompt_len,
 
         /* Standard single-token step (fallback) */
         /* Forward pass */
+        fprintf(stderr, "→ forward pass (gen_len=%d)...\n", inf->gen_len);
         tl_forward(inf, inf->generated, inf->gen_len, 1);
+        fprintf(stderr, "→ forward done\n");
 
         /* Sample next token */
         tl_token_t next = tl_sample(inf);
