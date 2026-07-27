@@ -32,8 +32,11 @@ tl_infer_t *tl_infer_create(tl_model_t *model, tl_tokenizer_t *tok, tl_sampler_t
      * Total: ~23K floats.  Use D * 24 as safe margin. */
     inf->hidden_buf    = tl_alloc(D * TL_MAX_BATCH_SIZE * sizeof(float));
     inf->logits_buf    = tl_alloc(V * TL_MAX_BATCH_SIZE * sizeof(float));
-    inf->attn_buf      = tl_alloc((D * 60 + TL_MAX_SEQ_LEN * 2) * sizeof(float)); /* was D*16/24, too small for MLA workspace + attn_scores */
-    inf->ffn_buf       = tl_alloc(V * sizeof(float));       /* for sampling */
+    /* attn_buf: max(MLA workspace, top-k sort pairs for full vocab) */
+    size_t mla_ws = (D * 60 + TL_MAX_SEQ_LEN * 2) * sizeof(float);
+    size_t sort_ws = (size_t)V * 2 * sizeof(float) + 4096; /* V pairs of {float,int} */
+    inf->attn_buf      = tl_alloc(mla_ws > sort_ws ? mla_ws : sort_ws);
+    inf->ffn_buf       = tl_alloc(V * sizeof(float));
     inf->expert_scores = tl_alloc(model->total_experts * sizeof(float));
 
     /* Generated tokens buffer */
@@ -176,7 +179,6 @@ int tl_generate(tl_infer_t *inf, const tl_token_t *prompt, int prompt_len,
     inf->gen_len = prompt_len;
 
     tl_token_t eos = inf->tokenizer->eos_id;
-    fprintf(stderr, "🔄 generation loop start (eos=%d)\n", eos);
 
     int step = 0;
     while (step < max_new_tokens) {
@@ -217,9 +219,7 @@ int tl_generate(tl_infer_t *inf, const tl_token_t *prompt, int prompt_len,
 
         /* Standard single-token step (fallback) */
         /* Forward pass */
-        fprintf(stderr, "→ forward pass (gen_len=%d)...\n", inf->gen_len);
         tl_forward(inf, inf->generated, inf->gen_len, 1);
-        fprintf(stderr, "→ forward done\n");
 
         /* Sample next token */
         tl_token_t next = tl_sample(inf);

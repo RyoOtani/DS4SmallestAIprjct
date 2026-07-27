@@ -51,7 +51,6 @@ static int extract_json_field(const char *json, const char *key,
 
 /* ── Parse completion request body ───────────────────────────────── */
 static void handle_completion(tl_infer_t *inf, int fd, const char *body) {
-    fprintf(stderr, "📨 completion request received\n");
     char prompt[16384] = {0};
     extract_json_field(body, "prompt", prompt, sizeof(prompt));
 
@@ -95,9 +94,7 @@ static void handle_completion(tl_infer_t *inf, int fd, const char *body) {
     char *result = tl_alloc(cap);
 
     /* Run generation */
-    fprintf(stderr, "⚡ generating (max=%d)...\n", max_tokens);
     int n_gen = tl_generate(inf, tokens, prompt_len, max_tokens, NULL, NULL);
-    fprintf(stderr, "✅ generated %d tokens\n", n_gen);
 
     /* Detokenize generated part */
     tl_token_t *gen = inf->generated + prompt_len;

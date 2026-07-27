@@ -3,13 +3,12 @@
 # Just type: make
 
 CC       := cc
-CFLAGS   := -std=c11 -O3 -march=native -flto
+CFLAGS   := -std=c11 -O2 -g -march=native
 CFLAGS   += -Wall -Wextra -Wpedantic -Werror=implicit-function-declaration
 CFLAGS   += -Wno-unused-parameter -Wno-missing-field-initializers -Wno-gnu-statement-expression
 CFLAGS   += -Iinclude -D_POSIX_C_SOURCE=200809L -D_DARWIN_C_SOURCE
 
-# Performance: auto-vectorization hints
-CFLAGS   += -ffast-math -funroll-loops
+# Performance: auto-vectorization hints (disabled for ASan debug)
 
 # OpenMP (optional, clang on macOS doesn't ship libomp)
 ifeq ($(shell $(CC) -fopenmp -E -x c /dev/null 2>/dev/null; echo $$?),0)
@@ -31,26 +30,21 @@ ifeq ($(UNAME_S),Darwin)
 	# Check for Apple Silicon native NEON
 	ARCH := $(shell uname -m)
 	ifeq ($(ARCH),arm64)
-		CFLAGS += -mcpu=apple-m1  # enables all NEON features
+		# CFLAGS += -mcpu=apple-m1  # disabled for ASan debug
 	endif
 endif
 ifeq ($(UNAME_S),Linux)
 	LDFLAGS += -lm -lpthread
 endif
 
-# Detect AVX2+FMA
-AVX2 := $(shell $(CC) -mavx2 -dM -E - < /dev/null 2>/dev/null | grep -q AVX2 && echo 1 || echo 0)
-FMA  := $(shell $(CC) -mfma -dM -E - < /dev/null 2>/dev/null | grep -q FMA && echo 1 || echo 0)
-ifeq ($(AVX2)$(FMA),11)
-CFLAGS += -mavx2 -mfma
-$(info ✓ AVX2+FMA detected)
-endif
-
-# Detect NEON
-NEON := $(shell $(CC) -march=armv8-a+simd -dM -E - < /dev/null 2>/dev/null | grep -q __ARM_NEON && echo 1 || echo 0)
-ifeq ($(NEON),1)
-CFLAGS += -march=armv8-a+simd
-$(info ✓ NEON detected)
+# Architecture-specific flags
+ifeq ($(UNAME_S),Darwin)
+	CFLAGS += -DTL_HAS_ACCELERATE=1
+	LDFLAGS += -framework Accelerate
+	ARCH := $(shell uname -m)
+	ifeq ($(ARCH),arm64)
+		CFLAGS += -mcpu=apple-m1
+	endif
 endif
 
 SRCS_C := $(wildcard src/*.c)
