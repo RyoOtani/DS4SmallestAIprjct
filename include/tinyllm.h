@@ -9,9 +9,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-/* ── Canonical special token IDs (single source of truth) ────────── */
-#include "tokenizer_ids.h"
-
 /* ═══════════════════════════════════════════════════════════════════
    Tensor / Matrix types
    ═══════════════════════════════════════════════════════════════════ */
@@ -28,6 +25,9 @@ typedef struct {
 
 /* ── Token ───────────────────────────────────────────────────────── */
 typedef int32_t tl_token_t;
+
+/* ── Canonical special token IDs (uses tl_token_t above) ─────────── */
+#include "tokenizer_ids.h"
 
 /* ── Batch of token sequences ────────────────────────────────────── */
 typedef struct {

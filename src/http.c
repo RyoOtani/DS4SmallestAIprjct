@@ -64,6 +64,21 @@ static void handle_completion(tl_infer_t *inf, int fd, const char *body) {
     if (extract_json_field(body, "temperature", t_str, sizeof(t_str)))
         temp = strtof(t_str, NULL);
 
+    /* Safety: validate tokenizer and model */
+    if (!inf || !inf->tokenizer || !inf->model) {
+        http_respond(fd, 503, "Service Unavailable",
+            "application/json",
+            "{\"error\":\"Model or tokenizer not loaded\"}");
+        return;
+    }
+
+    if (strlen(prompt) == 0) {
+        http_respond(fd, 400, "Bad Request",
+            "application/json",
+            "{\"error\":\"Empty prompt\"}");
+        return;
+    }
+
     /* Set temperature */
     inf->sampler.temperature = temp;
 

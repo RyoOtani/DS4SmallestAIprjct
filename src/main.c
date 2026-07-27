@@ -193,8 +193,35 @@ int main(int argc, char **argv) {
     }
     tl_model_print_info(model);
 
-    /* Tokenizer */
-    tl_tokenizer_t *tok = tl_tokenizer_load(model_path);
+    /* Tokenizer — try .tokbin next to model, then next to binary, then CWD */
+    char tokbin_path[4096];
+    tl_tokenizer_t *tok = NULL;
+
+    /* Try 1: .tokbin derived from model path */
+    snprintf(tokbin_path, sizeof(tokbin_path), "%s", model_path);
+    char *dot = strrchr(tokbin_path, '.');
+    if (dot) { *dot = '\0'; }
+    strlcat(tokbin_path, ".tokbin", sizeof(tokbin_path));
+    tok = tl_tokenizer_load(tokbin_path);
+
+    /* Try 2: tokenizer.tokbin next to the binary */
+    if (!tok && argv[0] && argv[0][0] == '/') {
+        snprintf(tokbin_path, sizeof(tokbin_path), "%s", argv[0]);
+        char *slash = strrchr(tokbin_path, '/');
+        if (slash) { *(slash + 1) = '\0'; }
+        strlcat(tokbin_path, "tokenizer.tokbin", sizeof(tokbin_path));
+        tok = tl_tokenizer_load(tokbin_path);
+    }
+
+    /* Try 3: tokenizer.tokbin in current working directory */
+    if (!tok) {
+        tok = tl_tokenizer_load("tokenizer.tokbin");
+    }
+
+    if (!tok) {
+        tl_log("⚠️  No tokenizer found. Tokenization will not work.");
+        tl_log("   Generate with: python export_tokenizer.py");
+    }
 
     /* Sampler (from env or defaults) */
     tl_sampler_t sampler = tl_sampler_default();

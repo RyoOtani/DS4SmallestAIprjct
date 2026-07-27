@@ -220,6 +220,8 @@ fail:
    ═══════════════════════════════════════════════════════════════════ */
 
 int tl_tokenize(tl_tokenizer_t *t, const char *text, tl_token_t *tokens, int max_tokens) {
+    if (!t || !text || !tokens || max_tokens <= 0) return 0;
+
     int text_len = (int)strlen(text);
     if (text_len == 0) return 0;
 
