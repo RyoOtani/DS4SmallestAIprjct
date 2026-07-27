@@ -30,8 +30,9 @@ static void tl_layer_forward(const tl_layer_t *layer, const float *hidden,
                              float *output, tl_kv_cache_t *kv_cache,
                              int layer_idx, int position,
                              float *workspace) {
-    int D = layer->rms_attn_w.cols;  /* hidden_dim */
-    if (D <= 0) D = 2048; /* fallback */
+    int D = layer->rms_attn_w.rows;  /* hidden_dim — 1D weight stored as [D] */
+    if (D <= 0) D = layer->rms_attn_w.cols; /* fallback to cols */
+    if (D <= 0) D = 2048; /* ultimate fallback */
 
     float *normed   = workspace;             /* [D] */
     float *attn_out = workspace + D;         /* [D] */
@@ -79,6 +80,18 @@ void tl_model_forward(const tl_model_t *model, const tl_token_t *tokens,
                       float *workspace) {
     int D = model->hidden_dim;
     int vocab = model->vocab_size;
+
+    /* Safety: check embeddings loaded */
+    if (!model->tok_embeddings.data) {
+        fprintf(stderr, "⚠️  tok_embeddings.data is NULL\n");
+        memset(logits, 0, vocab * sizeof(float));
+        return;
+    }
+    if (!model->layers) {
+        fprintf(stderr, "⚠️  model->layers is NULL\n");
+        memset(logits, 0, vocab * sizeof(float));
+        return;
+    }
 
     /* 1. Token embedding lookup (only last token for inference) */
     int last_pos = n_tokens - 1;

@@ -32,7 +32,7 @@ tl_infer_t *tl_infer_create(tl_model_t *model, tl_tokenizer_t *tok, tl_sampler_t
      * Total: ~23K floats.  Use D * 24 as safe margin. */
     inf->hidden_buf    = tl_alloc(D * TL_MAX_BATCH_SIZE * sizeof(float));
     inf->logits_buf    = tl_alloc(V * TL_MAX_BATCH_SIZE * sizeof(float));
-    inf->attn_buf      = tl_alloc(D * 24 * sizeof(float)); /* was D*16, too small for MLA */
+    inf->attn_buf      = tl_alloc((D * 60 + TL_MAX_SEQ_LEN * 2) * sizeof(float)); /* was D*16/24, too small for MLA workspace + attn_scores */
     inf->ffn_buf       = tl_alloc(V * sizeof(float));       /* for sampling */
     inf->expert_scores = tl_alloc(model->total_experts * sizeof(float));
 
@@ -107,36 +107,8 @@ static int speculative_draft(tl_infer_t *inf, tl_token_t *draft, int n_draft);
    been seen before in the generated so far. If so, predict the
    continuation. Falls back to model greedy if no match. */
 static int speculative_draft(tl_infer_t *inf, tl_token_t *draft, int n_draft) {
-    int lookback = 3; /* n-gram order */
-    if (inf->gen_len < lookback) return 0;
-
-    /* Try to find matching n-gram in generated history */
-    tl_token_t *gen = inf->generated;
-    int glen = inf->gen_len;
-
-    for (int n = 0; n < n_draft; n++) {
-        if (glen + n + 1 >= inf->gen_capacity) return n;
-
-        int found = 0;
-        /* Search history for matching n-gram */
-        for (int i = 0; i < glen + n - lookback; i++) {
-            bool match = true;
-            for (int j = 0; j < lookback; j++) {
-                if (gen[i+j] != gen[glen + n - lookback + j]) { match = false; break; }
-            }
-            if (match) {
-                draft[n] = gen[i + lookback];
-                found = 1;
-                break;
-            }
-        }
-        if (!found) {
-            /* Fall back to model greedy for the first unknown token */
-            if (n == 0) return 0;
-            return n; /* accept what we have so far */
-        }
-    }
-    return n_draft;
+    (void)inf; (void)draft; (void)n_draft;
+    return 0;  /* Disabled — use standard single-token path */
 }
 
 /* ── Verify drafts in parallel ──────────────────────────────────── */
