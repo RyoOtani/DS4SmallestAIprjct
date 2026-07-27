@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyLLM Chat</title>
+<style>
+:root {
+  --bg: #1a1a2e; --surface: #16213e; --primary: #0f3460;
+  --accent: #e94560; --text: #eee; --text-dim: #999;
+  --code-bg: #0d1117; --bubble-user: #1a3a5c; --bubble-ai: #16213e;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+       background: var(--bg); color: var(--text); height:100vh; display:flex; flex-direction:column; }
+header { background: var(--surface); padding: 12px 20px; border-bottom: 1px solid var(--primary);
+         display:flex; align-items:center; gap:12px; }
+header h1 { font-size: 1.2em; font-weight:600; }
+header .status { font-size:0.8em; color: var(--text-dim); }
+header .status.online { color: #4caf50; }
+main { flex:1; overflow-y:auto; padding: 20px; display:flex; flex-direction:column; gap:16px; }
+.message { display:flex; gap:12px; max-width: 800px; animation: fadeIn .3s; }
+.message.user { align-self:flex-end; flex-direction:row-reverse; }
+.message.assistant { align-self:flex-start; }
+.avatar { width:36px; height:36px; border-radius:50%; display:flex; align-items:center;
+          justify-content:center; font-size:1.2em; flex-shrink:0; }
+.message.user .avatar { background: var(--accent); }
+.message.assistant .avatar { background: var(--primary); }
+.bubble { padding: 12px 16px; border-radius: 16px; line-height:1.5; font-size:0.95em; }
+.message.user .bubble { background: var(--bubble-user); border-bottom-right-radius:4px; }
+.message.assistant .bubble { background: var(--bubble-ai); border-bottom-left-radius:4px; }
+.bubble pre { background: var(--code-bg); padding:12px; border-radius:8px; overflow-x:auto;
+              margin:8px 0; font-size:0.85em; }
+.bubble code { background: var(--code-bg); padding:2px 6px; border-radius:4px; font-size:0.9em; }
+.bubble pre code { background:none; padding:0; }
+.tool-call { background: #1a3a2e; border-left:3px solid #4caf50; padding:8px 12px;
+             margin:8px 0; border-radius:4px; font-size:0.85em; color:#81c784; }
+.tool-result { background: #3a2e1a; border-left:3px solid #ff9800; padding:8px 12px;
+               margin:8px 0; border-radius:4px; font-size:0.85em; color:#ffb74d; }
+.thinking { color: var(--text-dim); font-style:italic; font-size:0.85em; }
+footer { background: var(--surface); padding: 16px 20px; border-top: 1px solid var(--primary); }
+.input-row { display:flex; gap:8px; max-width:800px; margin:0 auto; }
+.input-row textarea { flex:1; background: var(--code-bg); color: var(--text);
+    border: 1px solid var(--primary); border-radius:12px; padding:12px 16px;
+    font-size:0.95em; resize:none; min-height:48px; max-height:200px;
+    font-family: inherit; }
+.input-row textarea:focus { outline:none; border-color: var(--accent); }
+.input-row button { background: var(--accent); color:white; border:none;
+    border-radius:12px; padding:12px 24px; font-size:0.95em; font-weight:600;
+    cursor:pointer; transition:opacity .2s; }
+.input-row button:hover { opacity:0.9; }
+.input-row button:disabled { opacity:0.5; cursor:not-allowed; }
+.tools-bar { display:flex; gap:8px; margin-top:8px; font-size:0.8em; color:var(--text-dim); }
+.tools-bar label { display:flex; align-items:center; gap:4px; cursor:pointer; }
+.tools-bar input[type=checkbox] { accent-color: var(--accent); }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+.empty-state { text-align:center; color:var(--text-dim); padding:60px 20px; }
+.empty-state h2 { font-size:1.5em; margin-bottom:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 TinyLLM Chat</h1>
+  <span class="status" id="status">接続中...</span>
+</header>
+<main id="chat"></main>
+<footer>
+  <div class="input-row">
+    <textarea id="prompt" rows="1" placeholder="メッセージを入力..."
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+    <button id="sendBtn" onclick="send()">送信</button>
+  </div>
+  <div class="tools-bar">
+    <label><input type="checkbox" id="webSearch" checked> 🌐 Web検索</label>
+    <label><input type="checkbox" id="useAgent"> 🧠 エージェントモード</label>
+    <span style="margin-left:auto" id="tokenCount"></span>
+  </div>
+</footer>
+<script>
+const API = '/v1/chat';
+let convId = Date.now().toString(36);
+
+function addMsg(role, content, extra) {
+  const main = document.getElementById('chat');
+  const div = document.createElement('div');
+  div.className = 'message ' + role;
+  const avatar = role==='user' ? '👤' : '🤖';
+  div.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble"></div>`;
+  const bubble = div.querySelector('.bubble');
+  
+  if (extra?.tool_calls) {
+    for (const tc of extra.tool_calls) {
+      const t = document.createElement('div'); t.className='tool-call';
+      t.textContent = `🔧 ${tc.name}: ${tc.params||''}`; bubble.appendChild(t);
+    }
+  }
+  if (extra?.tool_results) {
+    for (const tr of extra.tool_results) {
+      const t = document.createElement('div'); t.className='tool-result';
+      t.textContent = `📋 ${tr.name}: ${tr.result?.substring(0,200)||''}`; bubble.appendChild(t);
+    }
+  }
+  if (extra?.thinking) {
+    const t = document.createElement('div'); t.className='thinking';
+    t.textContent = '💭 ' + extra.thinking; bubble.appendChild(t);
+  }
+  
+  bubble.innerHTML += content;
+  main.appendChild(div);
+  main.scrollTop = main.scrollHeight;
+  return bubble;
+}
+
+async function send() {
+  const prompt = document.getElementById('prompt');
+  const btn = document.getElementById('sendBtn');
+  const text = prompt.value.trim();
+  if (!text) return;
+  
+  prompt.value = ''; btn.disabled = true;
+  const webSearch = document.getElementById('webSearch').checked;
+  const useAgent = document.getElementById('useAgent').checked;
+  
+  addMsg('user', text);
+  const bubble = addMsg('assistant', '<span class="thinking">考え中...</span>');
+  
+  try {
+    const resp = await fetch(API, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        prompt: text,
+        conversation_id: convId,
+        web_search: webSearch,
+        agent_mode: useAgent,
+        max_tokens: 1024,
+        temperature: 0.7,
+      }),
+    });
+    const data = await resp.json();
+    
+    let content = data.response || data.text || JSON.stringify(data);
+    // Simple markdown: code blocks
+    content = content.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+    content = content.replace(/`([^`]+)`/g, '<code>$1</code>');
+    content = content.replace(/\n/g, '<br>');
+    
+    bubble.innerHTML = content;
+    if (data.tool_calls) {
+      for (const tc of data.tool_calls) {
+        const t = document.createElement('div'); t.className='tool-call';
+        t.textContent = `🔧 ${tc.name}`; bubble.appendChild(t);
+      }
+    }
+    
+    document.getElementById('tokenCount').textContent =
+      `tokens: ${data.usage?.total_tokens||'?'}`;
+    
+  } catch (e) {
+    bubble.innerHTML = `<span style="color:#e94560">❌ エラー: ${e.message}</span>`;
+  }
+  
+  btn.disabled = false; prompt.focus();
+}
+
+async function checkHealth() {
+  try {
+    const r = await fetch('/health');
+    if (r.ok) {
+      document.getElementById('status').textContent = '🟢 オンライン';
+      document.getElementById('status').className = 'status online';
+    }
+  } catch(e) {
+    document.getElementById('status').textContent = '🔴 オフライン';
+    document.getElementById('status').className = 'status';
+  }
+}
+checkHealth(); setInterval(checkHealth, 10000);
+
+document.addEventListener('DOMContentLoaded', () => {
+  const main = document.getElementById('chat');
+  main.innerHTML = `<div class="empty-state">
+    <h2>🤖 TinyLLM Chat</h2>
+    <p>Web検索 🌐 と エージェントモード 🧠 が使えます</p>
+    <p style="margin-top:8px">質問を入力してください</p>
+  </div>`;
+});
+</script>
+</body>
+</html>
