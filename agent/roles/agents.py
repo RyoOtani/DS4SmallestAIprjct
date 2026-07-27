@@ -281,6 +281,11 @@ Output ONLY the unified diff (diff --git format). No explanations."""
             return self._gen_impl_patch(fname, plan, idx)
 
     def _gen_test_patch(self, fname: str, plan: Plan) -> str:
+        """Generate test code template (fallback when no LLM available).
+        
+        NOTE: Template-only. The TODO markers are intentional placeholders.
+        In production, use the LLM-based path via self._llm_generate().
+        """
         name = plan.task_id.replace('-', '_')
         return f"""--- a/{fname}
 +++ b/{fname}
@@ -303,6 +308,13 @@ Output ONLY the unified diff (diff --git format). No explanations."""
 """
 
     def _gen_impl_patch(self, fname: str, plan: Plan, idx: int) -> str:
+        """Generate implementation code template.
+        
+        NOTE: Template-only fallback. The 'TODO: Implement actual processing logic'
+        is intentional — in production, the LLM-based path (self._llm_generate)
+        produces real implementations. This template ensures offline/demo mode
+        still returns valid structure.
+        """
         name = plan.task_id.replace('-', '_')
         desc = plan.reasoning if hasattr(plan, 'reasoning') else plan.task_id
         return f"""--- a/{fname}

@@ -5,8 +5,16 @@ import urllib.request
 import urllib.error
 
 class LLMProvider:
+    """Abstract base class for LLM providers.
+    
+    Concrete implementations:
+      - OpenAICompatibleProvider (HTTP API)
+      - MockProvider (testing)
+    
+    Not meant to be instantiated directly.
+    """
     def complete(self, messages, **kwargs):
-        raise NotImplementedError
+        raise NotImplementedError("Use OpenAICompatibleProvider or MockProvider")
 
 class OpenAICompatibleProvider(LLMProvider):
     """Works with OpenAI-compatible /v1/chat/completions endpoints."""

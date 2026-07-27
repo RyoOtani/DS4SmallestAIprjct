@@ -18,14 +18,19 @@ class RoleResult:
 
 
 class BaseRole:
+    """Abstract base for multi-agent roles.
+    
+    Subclasses (Planner, Architect, Coder, Tester, Critic, Evaluator, Debugger)
+    implement run() with optional LLM provider integration.
+    Without a provider, roles fall back to template-based responses.
+    """
     name = "base"
 
     def __init__(self, provider=None):
-        """provider: optional LLMProvider for intelligent reasoning."""
         self.provider = provider
 
     def run(self, context: Dict[str, Any]) -> RoleResult:
-        raise NotImplementedError
+        raise NotImplementedError("Use Planner/Coder/Tester/etc. subclass")
 
     def _ask_llm(self, system: str, prompt: str) -> Optional[str]:
         """Query LLM if provider is available."""

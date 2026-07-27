@@ -15,8 +15,15 @@ class ModelResponse:
     raw: Any = None
 
 class Provider:
+    """Abstract base class for model providers.
+    
+    Concrete implementations:
+      - CommandProvider (local CLI, e.g. ollama)
+      - OpenAICompatibleProvider (HTTP API)
+    Use provider_from_env() for automatic selection.
+    """
     def generate(self, prompt: str, system: str = "") -> ModelResponse:
-        raise NotImplementedError
+        raise NotImplementedError("Use CommandProvider or OpenAICompatibleProvider")
 
 class OpenAICompatibleProvider(Provider):
     def __init__(self, base_url: str, model: str, api_key: str = "", timeout: int = 120):
@@ -41,17 +48,30 @@ class OpenAICompatibleProvider(Provider):
         return ModelResponse(data["choices"][0]["message"]["content"], data)
 
 class CommandProvider(Provider):
-    """Adapter for a local CLI model. Command receives prompt on stdin."""
+    """Adapter for a local CLI model. Prompt is piped via stdin.
+    
+    Security: uses subprocess with shell=False and list arguments
+    to prevent command injection. The command must be an executable path
+    or a single command name (no shell metacharacters).
+    """
     def __init__(self, command: str, timeout: int = 120):
         self.command = command
         self.timeout = timeout
 
     def generate(self, prompt: str, system: str = "") -> ModelResponse:
         full = (system + "\n\n" if system else "") + prompt
-        p = subprocess.run(self.command, input=full, text=True, shell=True,
-                           capture_output=True, timeout=self.timeout)
+        # Use list form + shell=False to prevent command injection
+        # Split command into argv parts safely
+        import shlex
+        cmd_parts = shlex.split(self.command)
+        p = subprocess.run(
+            cmd_parts,
+            input=full, text=True,
+            capture_output=True, timeout=self.timeout,
+            shell=False,  # ← Safe: no shell interpretation
+        )
         if p.returncode:
-            raise RuntimeError(p.stderr or f"provider exited {p.returncode}")
+            raise RuntimeError(p.stderr.strip() or f"provider exited {p.returncode}")
         return ModelResponse(p.stdout)
 
 def provider_from_env() -> Provider:
