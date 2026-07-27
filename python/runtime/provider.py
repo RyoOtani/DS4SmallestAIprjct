@@ -60,16 +60,17 @@ class CommandProvider(Provider):
 
     def generate(self, prompt: str, system: str = "") -> ModelResponse:
         full = (system + "\n\n" if system else "") + prompt
-        # Use list form + shell=False to prevent command injection
-        # Split command into argv parts safely
         import shlex
         cmd_parts = shlex.split(self.command)
-        p = subprocess.run(
-            cmd_parts,
-            input=full, text=True,
-            capture_output=True, timeout=self.timeout,
-            shell=False,  # ← Safe: no shell interpretation
-        )
+        try:
+            p = subprocess.run(
+                cmd_parts,
+                input=full, text=True,
+                capture_output=True, timeout=self.timeout,
+                shell=False,
+            )
+        except FileNotFoundError:
+            raise RuntimeError(f"Command not found: {cmd_parts[0]}")
         if p.returncode:
             raise RuntimeError(p.stderr.strip() or f"provider exited {p.returncode}")
         return ModelResponse(p.stdout)

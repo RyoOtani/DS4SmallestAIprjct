@@ -474,12 +474,13 @@ def _search_code(pattern: str, file_pattern: str = "**/*", max_results: int = 20
 
 
 def _run_command(command: str, cwd: str = ".", timeout: int = 30) -> str:
-    """Execute a shell command."""
-    import subprocess
+    """Execute a command safely (shell=False, no injection risk)."""
+    import subprocess, shlex
     try:
+        cmd_parts = shlex.split(command)
         result = subprocess.run(
-            command, shell=True, capture_output=True, text=True,
-            cwd=cwd, timeout=timeout
+            cmd_parts, capture_output=True, text=True,
+            cwd=cwd, timeout=timeout, shell=False,
         )
         output = result.stdout.strip()
         if result.returncode != 0:

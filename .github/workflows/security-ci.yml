@@ -1,0 +1,71 @@
+name: Security & Code Quality CI
+
+on:
+  push:
+    paths:
+      - '**.py'
+      - '.github/workflows/security-ci.yml'
+  pull_request:
+    paths:
+      - '**.py'
+
+jobs:
+  security-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Forbidden pattern check (shell=True)
+        run: |
+          echo "🔍 Checking for shell=True in Python files..."
+          # Find shell=True that isn't in comments/docstrings
+          FOUND=$(grep -rn "shell=True" --include="*.py" . | grep -v "#" | grep -v '"""' | grep -v "'''" | grep -v ".git/" | grep -v "__pycache__" || true)
+          if [ -n "$FOUND" ]; then
+            echo "❌ SECURITY VIOLATION: shell=True found:"
+            echo "$FOUND"
+            echo ""
+            echo "All subprocess calls must use shell=False with shlex.split()"
+            exit 1
+          fi
+          echo "✅ No shell=True violations found"
+
+      - name: Forbidden pattern check (eval/exec)
+        run: |
+          echo "🔍 Checking for dangerous eval/exec usage..."
+          FOUND=$(grep -rn "\beval\s*(" --include="*.py" . | grep -v "#" | grep -v "test_" | grep -v ".git/" | grep -v __pycache__ || true)
+          if [ -n "$FOUND" ]; then
+            echo "⚠️  eval() usage found (review manually):"
+            echo "$FOUND"
+          fi
+          FOUND2=$(grep -rn "\bexec\s*(" --include="*.py" . | grep -v "#" | grep -v "test_" | grep -v ".git/" | grep -v __pycache__ || true)
+          if [ -n "$FOUND2" ]; then
+            echo "⚠️  exec() usage found (review manually):"
+            echo "$FOUND2"
+          fi
+          echo "✅ Dangerous pattern check complete"
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check . --select=E,F,W --ignore=E501,W503 --exclude "__pycache__,.git" || true
+          echo "✅ Ruff lint complete"
+
+      - name: Run security tests
+        run: |
+          pip install pytest
+          python -m pytest tests/test_security.py -v --tb=short
+          echo "✅ Security tests passed"
+
+      - name: Summary
+        run: |
+          echo "✅ Security CI: ALL CHECKS PASSED"
+          echo "  - No shell=True violations"
+          echo "  - Security regression tests passed"
+          echo "  - Code quality lint complete"

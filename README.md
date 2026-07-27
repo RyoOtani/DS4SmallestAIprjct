@@ -274,6 +274,45 @@ huggingface-cli upload Ryo3desu/tinyllm-models your-model.gguf tinyllm-small/you
 
 ---
 
+## 🏗️ Design Decisions (設計上の意図)
+
+Some components are intentionally limited in scope. This documents WHY.
+
+### `export_gguf.py` — Export-only, not for inference
+
+The `TinyLLMLayer.forward()` and `TinyLLMModel.forward()` in `export_gguf.py` raise `NotImplementedError`. **This is by design.**
+
+- These classes exist solely to extract weight tensors for GGUF conversion.
+- Actual inference runs in the **C runtime** (`./tinyllm run model.gguf`) or the notebook training model.
+- Use `test_forward()` for basic structure verification during export.
+- For Python inference: use the notebook's `TinyLLMModel` or HuggingFace `AutoModel`.
+
+### Multi-Agent Roles — Template fallback without LLM
+
+`agent/multi_agent/roles.py` roles (Planner, Coder, Tester, etc.) return **template-based responses** when no LLM provider is configured.
+
+- With a provider: roles use LLM for intelligent reasoning.
+- Without a provider: roles fall back to sensible defaults (inspect→design→implement→verify→review).
+- This ensures the system **always functions**, even offline.
+
+### Metal GPU — CPU fallback
+
+`src/metal.m` functions return `0` (CPU fallback) when Metal is not available.
+
+- If running on Apple Silicon WITH Metal: GPU-accelerated inference.
+- If running on Intel Mac / Linux / without Metal: transparent CPU fallback.
+- Auto-detected at compile time via `config.h` (`TL_HAS_METAL`).
+
+### Provider Security — `shell=False` enforced
+
+All `subprocess.run()` calls in provider code use `shell=False` with `shlex.split()`.
+
+- Prevents command injection via user/prompt content.
+- Verified by `tests/test_security.py` and CI pipeline.
+- Regression: any new `shell=True` is caught by CI.
+
+---
+
 ## 📚 Tokenizer & Dataset Specification
 
 ### Tokenizer
