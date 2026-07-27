@@ -56,11 +56,51 @@ footer { background: var(--surface); padding: 16px 20px; border-top: 1px solid v
 @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
 .empty-state { text-align:center; color:var(--text-dim); padding:60px 20px; }
 .empty-state h2 { font-size:1.5em; margin-bottom:8px; }
+/* ── Settings Modal ── */
+.modal-overlay { display:none; position:fixed; top:0;left:0;right:0;bottom:0;
+    background:rgba(0,0,0,0.7); z-index:100; justify-content:center; align-items:center; }
+.modal-overlay.open { display:flex; }
+.modal { background: var(--surface); border-radius:16px; padding:24px; max-width:480px;
+         width:90%; max-height:80vh; overflow-y:auto; border:1px solid var(--primary); }
+.modal h2 { font-size:1.1em; margin-bottom:16px; }
+.modal label { display:block; font-size:0.85em; color:var(--text-dim); margin-bottom:4px; }
+.modal select, .modal input { width:100%; padding:10px 12px; border-radius:8px;
+    background: var(--code-bg); color: var(--text); border:1px solid var(--primary);
+    font-size:0.9em; margin-bottom:12px; font-family: inherit; }
+.modal select:focus, .modal input:focus { outline:none; border-color: var(--accent); }
+.modal .hint { font-size:0.75em; color: var(--text-dim); margin-bottom:12px; }
+.modal .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
+.modal .actions button { padding:8px 20px; border-radius:8px; font-size:0.9em;
+    border:none; cursor:pointer; font-weight:600; }
+.modal .btn-primary { background: var(--accent); color: white; }
+.modal .btn-secondary { background: var(--primary); color: var(--text); }
 </style>
 </head>
 <body>
+
+<!-- ── Settings Modal ── -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <h2>⚙️ モデル設定</h2>
+    <label for="providerSelect">🤖 モデルを選択</label>
+    <select id="providerSelect"></select>
+    <div id="apiKeyGroup">
+      <label for="apiKeyInput">🔑 APIキー</label>
+      <input type="password" id="apiKeyInput" placeholder="sk-...（サーバーメモリのみ保持、保存されません）">
+      <div class="hint">⚠️ APIキーはサーバーメモリ上にのみ保持され、ディスクに一切保存されません</div>
+    </div>
+    <div class="actions">
+      <button class="btn-secondary" onclick="closeSettings()">キャンセル</button>
+      <button class="btn-primary" onclick="applySettings()">適用</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <h1>🤖 TinyLLM Chat</h1>
+  <span class="spacer"></span>
+  <button class="model-badge" id="modelBadge" onclick="openSettings()" title="クリックでモデル切替">🧩 Template</button>
+  <button class="settings-btn" onclick="openSettings()" title="設定">⚙️</button>
   <span class="status" id="status">接続中...</span>
 </header>
 <main id="chat"></main>
@@ -78,7 +118,74 @@ footer { background: var(--surface); padding: 16px 20px; border-top: 1px solid v
 </footer>
 <script>
 const API = '/v1/chat';
+const CFG = '/v1/config';
+const PROV = '/v1/providers';
 let convId = Date.now().toString(36);
+let currentProviderId = 'template';
+
+// ── Provider list ─────────────────────────────────────
+async function loadProviders() {
+  try {
+    const r = await fetch(PROV); const d = await r.json();
+    const sel = document.getElementById('providerSelect');
+    sel.innerHTML = '';
+    for (const p of d.providers) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.label;
+      if (p.requires_api_key) opt.dataset.needsKey = '1';
+      sel.appendChild(opt);
+    }
+    sel.value = currentProviderId;
+    toggleApiKey();
+    sel.onchange = toggleApiKey;
+  } catch(e) { console.error('Failed to load providers', e); }
+}
+
+function toggleApiKey() {
+  const sel = document.getElementById('providerSelect');
+  const opt = sel.selectedOptions[0];
+  const needsKey = opt?.dataset?.needsKey === '1';
+  document.getElementById('apiKeyGroup').style.display = needsKey ? 'block' : 'none';
+}
+
+// ── Settings ──────────────────────────────────────────
+async function openSettings() {
+  document.getElementById('settingsModal').classList.add('open');
+  if (document.getElementById('providerSelect').children.length === 0) {
+    await loadProviders();
+  }
+  try {
+    const r = await fetch(CFG); const d = await r.json();
+    document.getElementById('providerSelect').value = d.provider_id;
+    currentProviderId = d.provider_id;
+    toggleApiKey();
+  } catch(e) {}
+}
+
+function closeSettings() {
+  document.getElementById('settingsModal').classList.remove('open');
+}
+
+async function applySettings() {
+  const sel = document.getElementById('providerSelect');
+  const key = document.getElementById('apiKeyInput').value.trim();
+  const providerId = sel.value;
+  try {
+    const resp = await fetch(CFG, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ provider_id: providerId, api_key: key || undefined }),
+    });
+    const data = await resp.json();
+    currentProviderId = data.provider_id;
+    document.getElementById('modelBadge').textContent = data.provider_label || providerId;
+    closeSettings();
+    document.getElementById('apiKeyInput').value = '';
+  } catch(e) {
+    alert('設定の適用に失敗しました: ' + e.message);
+  }
+}
 
 function addMsg(role, content, extra) {
   const main = document.getElementById('chat');
@@ -87,24 +194,22 @@ function addMsg(role, content, extra) {
   const avatar = role==='user' ? '👤' : '🤖';
   div.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble"></div>`;
   const bubble = div.querySelector('.bubble');
-  
   if (extra?.tool_calls) {
     for (const tc of extra.tool_calls) {
       const t = document.createElement('div'); t.className='tool-call';
-      t.textContent = `🔧 ${tc.name}: ${tc.params||''}`; bubble.appendChild(t);
+      t.textContent = `🔧 ${tc.name}`; bubble.appendChild(t);
     }
   }
   if (extra?.tool_results) {
     for (const tr of extra.tool_results) {
       const t = document.createElement('div'); t.className='tool-result';
-      t.textContent = `📋 ${tr.name}: ${tr.result?.substring(0,200)||''}`; bubble.appendChild(t);
+      t.textContent = `📋 ${tr.name}`; bubble.appendChild(t);
     }
   }
   if (extra?.thinking) {
     const t = document.createElement('div'); t.className='thinking';
     t.textContent = '💭 ' + extra.thinking; bubble.appendChild(t);
   }
-  
   bubble.innerHTML += content;
   main.appendChild(div);
   main.scrollTop = main.scrollHeight;
@@ -116,35 +221,26 @@ async function send() {
   const btn = document.getElementById('sendBtn');
   const text = prompt.value.trim();
   if (!text) return;
-  
   prompt.value = ''; btn.disabled = true;
   const webSearch = document.getElementById('webSearch').checked;
   const useAgent = document.getElementById('useAgent').checked;
-  
   addMsg('user', text);
   const bubble = addMsg('assistant', '<span class="thinking">考え中...</span>');
-  
   try {
     const resp = await fetch(API, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        prompt: text,
-        conversation_id: convId,
-        web_search: webSearch,
-        agent_mode: useAgent,
-        max_tokens: 1024,
-        temperature: 0.7,
+        prompt: text, conversation_id: convId,
+        web_search: webSearch, agent_mode: useAgent,
+        max_tokens: 1024, temperature: 0.7,
       }),
     });
     const data = await resp.json();
-    
     let content = data.response || data.text || JSON.stringify(data);
-    // Simple markdown: code blocks
     content = content.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
     content = content.replace(/`([^`]+)`/g, '<code>$1</code>');
     content = content.replace(/\n/g, '<br>');
-    
     bubble.innerHTML = content;
     if (data.tool_calls) {
       for (const tc of data.tool_calls) {
@@ -152,14 +248,14 @@ async function send() {
         t.textContent = `🔧 ${tc.name}`; bubble.appendChild(t);
       }
     }
-    
+    if (data.provider) {
+      document.getElementById('modelBadge').textContent = data.provider;
+    }
     document.getElementById('tokenCount').textContent =
       `tokens: ${data.usage?.total_tokens||'?'}`;
-    
   } catch (e) {
     bubble.innerHTML = `<span style="color:#e94560">❌ エラー: ${e.message}</span>`;
   }
-  
   btn.disabled = false; prompt.focus();
 }
 
@@ -181,9 +277,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const main = document.getElementById('chat');
   main.innerHTML = `<div class="empty-state">
     <h2>🤖 TinyLLM Chat</h2>
-    <p>Web検索 🌐 と エージェントモード 🧠 が使えます</p>
-    <p style="margin-top:8px">質問を入力してください</p>
+    <p>🌐 Web検索 + 🧠 エージェントモード + 🔀 マルチモデル対応</p>
+    <p style="margin-top:8px">右上の ⚙️ から OpenAI / DeepSeek / TinyLLM を選択できます</p>
   </div>`;
+  fetch(CFG).then(r=>r.json()).then(d=>{
+    document.getElementById('modelBadge').textContent = d.provider_label || '🧩 Template';
+    currentProviderId = d.provider_id;
+  }).catch(()=>{});
 });
 </script>
 </body>

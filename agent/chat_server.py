@@ -30,6 +30,55 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from agent.web_search import search_and_summarize, web_search, fetch_page
+from agent.providers import (
+    BaseProvider, TemplateProvider, OpenAICompatibleProvider, TinyLLMCProvider,
+    create_provider, create_from_preset, list_providers, PRESETS,
+)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Server Config (in-memory — no disk write for API key safety)
+# ═══════════════════════════════════════════════════════════════
+
+class ServerConfig:
+    """Runtime config: selected provider, API keys (never written to disk)."""
+    def __init__(self):
+        self.provider_id = "template"
+        self.api_key = ""
+        self.provider: BaseProvider = TemplateProvider()
+
+    def to_dict(self) -> dict:
+        return {
+            "provider_id": self.provider_id,
+            "has_api_key": bool(self.api_key),
+            "provider_label": self.provider.label,
+        }
+
+    def set_provider(self, provider_id: str, api_key: str = None):
+        """Switch to a different provider."""
+        if api_key is not None and api_key.strip():
+            self.api_key = api_key.strip()
+
+        self.provider_id = provider_id
+
+        if provider_id.startswith("preset:"):
+            preset_name = provider_id.split(":", 1)[1]
+            self.provider = create_from_preset(preset_name, self.api_key)
+        elif provider_id == "openai_compatible":
+            # Custom OpenAI-compatible — use env vars or defaults
+            self.provider = OpenAICompatibleProvider(
+                api_key=self.api_key,
+                base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+                model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
+            )
+        elif provider_id == "tinyllm_c":
+            self.provider = TinyLLMCProvider(
+                server_url=os.environ.get("TINYLLM_SERVER", "http://localhost:8420")
+            )
+        else:
+            self.provider = create_provider(provider_id, api_key=self.api_key)
+        
+        print(f"🔀 Provider switched to: {self.provider.label}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -62,13 +111,10 @@ class ConversationStore:
 
 
 # ═══════════════════════════════════════════════════════════════
-# Agent Integration
+# Chat Agent (provider-agnostic)
 # ═══════════════════════════════════════════════════════════════
 
-class ChatAgent:
-    """Simple agent with web search capability."""
-    
-    SYSTEM_PROMPT = """You are TinyLLM, a helpful AI assistant with web search capability.
+SYSTEM_PROMPT = """You are TinyLLM, a helpful AI assistant with web search capability.
 You can search the web for current information to provide accurate answers.
 
 When answering:
@@ -76,41 +122,39 @@ When answering:
 - Cite sources when using web search results
 - Format code with triple backticks
 - Be concise but thorough
-- If you're unsure, say so and suggest what to search for
+- Answer in the same language as the user's question"""
 
-Your response should be in the same language as the user's question."""
 
-    def __init__(self, tokenizer_path: str = None):
-        self.tokenizer_path = tokenizer_path or "tokenizer"
+class ChatAgent:
+    """Orchestrates web search + LLM provider for chat responses."""
+
+    def __init__(self, config: ServerConfig):
+        self.config = config
         self._load_tokenizer()
-    
+
     def _load_tokenizer(self):
         try:
             from transformers import AutoTokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_path, use_fast=True)
+            self.tokenizer = AutoTokenizer.from_pretrained("tokenizer", use_fast=True)
             self.tokenizer_loaded = True
         except Exception:
             self.tokenizer = None
             self.tokenizer_loaded = False
-    
+
     def chat(self, prompt: str, history: List[dict] = None,
              web_search_enabled: bool = True, agent_mode: bool = False) -> dict:
-        """
-        Process a chat message and return response with metadata.
-        """
         tool_calls = []
         tool_results = []
         thinking = None
         search_context = ""
-        
-        # ── Web Search ────────────────────────────────────
+
+        # ── Web Search ────────────────────────────────
         if web_search_enabled:
-            # Determine if search is needed
             search_triggers = ['最新', '今日', '現在', '教えて', 'とは', 'what is',
                               'how to', 'latest', 'current', 'news', 'weather',
                               'いつ', 'どこ', '誰', 'why', 'when', 'where']
             needs_search = any(t in prompt.lower() for t in search_triggers)
-            
+
             if needs_search:
                 thinking = f"Searching the web for: {prompt[:100]}..."
                 try:
@@ -119,21 +163,38 @@ Your response should be in the same language as the user's question."""
                     tool_results.append({"name": "web_search", "result": search_context[:500]})
                 except Exception as e:
                     search_context = f"(Web search unavailable: {e})"
-        
-        # ── Agent Mode ────────────────────────────────────
+
+        # ── Build prompt with search context ──────────
+        full_prompt = prompt
+        if search_context and "No results found" not in search_context:
+            full_prompt = (
+                f"[Web search results for the user's question]\n{search_context}\n\n"
+                f"[User question]\n{prompt}\n\n"
+                f"Please answer based on the search results above. Cite sources."
+            )
+
+        # ── Get response from provider ─────────────────
+        try:
+            response = self.config.provider.chat(
+                prompt=full_prompt,
+                history=history,
+                system_prompt=SYSTEM_PROMPT,
+            )
+        except Exception as e:
+            response = f"⚠️ モデルエラー: {e}"
+
+        # ── Agent mode wrapping ───────────────────────
         if agent_mode:
-            thinking = (thinking or "") + "\nAgent mode: analyzing step by step..."
-            response = self._agent_reason(prompt, history, search_context)
-        else:
-            response = self._simple_response(prompt, history, search_context)
-        
-        # ── Token count ───────────────────────────────────
+            thinking = (thinking or "") + "\n🧠 Agent mode: reasoning..."
+            response = f"📋 **分析**: 質問を解析\n🔍 **検索**: Web検索実行\n💭 **推論**: 情報を統合\n\n---\n\n{response}"
+
+        # ── Token count ───────────────────────────────
         usage = {"total_tokens": len(prompt.split()) + len(response.split())}
         if self.tokenizer_loaded:
             try:
                 usage["total_tokens"] = len(self.tokenizer.encode(prompt + response))
             except: pass
-        
+
         return {
             "response": response,
             "thinking": thinking,
@@ -142,78 +203,8 @@ Your response should be in the same language as the user's question."""
             "usage": usage,
             "web_search_used": bool(search_context),
             "agent_mode": agent_mode,
+            "provider": self.config.provider.label,
         }
-    
-    def _simple_response(self, prompt: str, history: List[dict], context: str) -> str:
-        """Generate a simple response (no LLM — template-based for demo)."""
-        prompt_lower = prompt.lower()
-        
-        # Greetings
-        if any(w in prompt_lower for w in ['こんにちは', 'hello', 'hi', 'hey']):
-            return "こんにちは！TinyLLM チャットへようこそ。Web検索とエージェントモードが使えます。何かお手伝いしましょうか？"
-        
-        # Capabilities
-        if any(w in prompt_lower for w in ['何ができる', 'できること', '機能', 'help', 'what can you']):
-            return """🌐 **Web検索**: DuckDuckGo でリアルタイム検索ができます
-🧠 **エージェントモード**: 複数ステップの推論とツール実行
-💬 **会話履歴**: セッションごとに会話を記憶します
-
-右下のチェックボックスでWeb検索とエージェントモードを切り替えられます。"""
-        
-        # With search context
-        if context and "No results found" not in context:
-            lines = context.split('\n')
-            sources = [l for l in lines if l.startswith('🔗')]
-            answer = f"Web検索の結果です：\n\n{context[:800]}\n\n"
-            if sources:
-                answer += f"📚 参考: {', '.join(sources[:3])}"
-            return answer
-        
-        # Code help
-        if any(w in prompt_lower for w in ['コード', 'code', 'python', '関数', 'function']):
-            return """コードのお手伝いをします。例：
-
-```python
-def hello(name: str) -> str:
-    \"\"\"挨拶を返す関数\"\"\"
-    return f"こんにちは、{name}さん！"
-
-# 使い方
-print(hello("世界"))
-```
-
-何を実装したいか教えてください。より詳しいコードを生成します。"""
-        
-        # Japanese fallback
-        if any('\u3040' <= c <= '\u30ff' for c in prompt):  # contains Japanese
-            return f"「{prompt[:100]}」についてのお問い合わせですね。\n\nWeb検索を有効にすると、より正確な最新情報をお届けできます。右下の🌐 Web検索をONにしてお試しください。"
-        
-        # Default
-        return f"I understand you're asking about: _{prompt[:200]}_\n\nEnable **🌐 Web Search** (bottom-right) for real-time information, or **🧠 Agent Mode** for multi-step reasoning.\n\nHow can I help you further?"
-    
-    def _agent_reason(self, prompt: str, history: List[dict], context: str) -> str:
-        """Agent mode: multi-step reasoning with tool context."""
-        steps = []
-        
-        # Step 1: Analyze
-        steps.append("📋 **分析**: 質問を理解しました")
-        
-        # Step 2: Search (already done)
-        if context:
-            steps.append("🔍 **検索**: Web検索を実行しました")
-        
-        # Step 3: Reason
-        steps.append("💭 **推論**: 情報を統合して回答を生成中...")
-        
-        # Build response
-        response = "\n".join(steps) + "\n\n---\n\n"
-        
-        if context and "No results found" not in context:
-            response += context[:1000]
-        else:
-            response += f"「{prompt[:150]}」について、Web検索の結果が見つかりませんでした。別のキーワードでお試しいただくか、より具体的な質問を入力してください。"
-        
-        return response
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -223,70 +214,93 @@ print(hello("世界"))
 class ChatHandler(BaseHTTPRequestHandler):
     agent: ChatAgent = None
     store: ConversationStore = None
-    
+    config: ServerConfig = None
+
     def log_message(self, format, *args):
-        print(f"📡 {self.client_address[0]} — {args[0]}") if not args[0].startswith('GET /health') else None
-    
+        if not args[0].startswith('GET /health'):
+            print(f"📡 {self.client_address[0]} — {args[0]}")
+
     def do_GET(self):
-        if self.path in ('/', '/index.html'):
+        path = self.path.split('?')[0]
+        if path in ('/', '/index.html'):
             self._serve_ui()
-        elif self.path == '/health':
+        elif path == '/health':
             self._json(200, {"status": "ok", "timestamp": time.time()})
+        elif path == '/v1/providers':
+            self._json(200, {"providers": list_providers()})
+        elif path == '/v1/config':
+            self._json(200, self.config.to_dict())
         else:
             self._json(404, {"error": "Not found"})
-    
+
     def do_POST(self):
-        if self.path == '/v1/chat':
+        path = self.path.split('?')[0]
+        if path == '/v1/chat':
             self._handle_chat()
+        elif path == '/v1/config':
+            self._handle_config()
         else:
             self._json(404, {"error": "Not found"})
-    
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-    
+
     def _serve_ui(self):
         ui_path = Path(__file__).parent / 'web_chat' / 'index.html'
         if ui_path.exists():
             content = ui_path.read_text(encoding='utf-8')
             self._html(200, content)
         else:
-            self._html(200, """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>TinyLLM</title></head>
-<body style="font-family:sans-serif;max-width:800px;margin:40px auto;padding:20px;background:#1a1a2e;color:#eee">
-<h1>🤖 TinyLLM Chat</h1><p>Chat UI not found. Place <code>agent/web_chat/index.html</code> in the repo.</p>
-<p>Run: <code>python chat_server.py</code> from the repo root.</p>
-</body></html>""")
-    
+            self._html(200, "<!DOCTYPE html><html lang='ja'><head><meta charset='UTF-8'><title>TinyLLM</title></head>"
+                "<body style='font-family:sans-serif;max-width:800px;margin:40px auto;padding:20px;background:#1a1a2e;color:#eee'>"
+                "<h1>🤖 TinyLLM Chat</h1><p>Chat UIが見つかりません。</p>"
+                "<p><code>agent/web_chat/index.html</code> を配置してください。</p></body></html>")
+
     def _handle_chat(self):
         try:
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length).decode())
         except Exception:
             return self._json(400, {"error": "Invalid JSON"})
-        
+
         prompt = body.get('prompt', '').strip()
         if not prompt:
             return self._json(400, {"error": "Empty prompt"})
-        
+
         conv_id = body.get('conversation_id', 'default')
         web_search_enabled = body.get('web_search', True)
         agent_mode = body.get('agent_mode', False)
-        
-        # Get history
+
         history = self.store.get(conv_id)
-        
-        # Generate response
         result = self.agent.chat(prompt, history, web_search_enabled, agent_mode)
-        
-        # Store conversation
+
         self.store.add(conv_id, 'user', prompt)
         self.store.add(conv_id, 'assistant', result['response'])
-        
+
         self._json(200, result)
-    
+
+    def _handle_config(self):
+        """POST /v1/config — switch provider or set API key."""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length).decode())
+        except Exception:
+            return self._json(400, {"error": "Invalid JSON"})
+
+        provider_id = body.get('provider_id')
+        api_key = body.get('api_key')
+
+        if provider_id:
+            self.config.set_provider(provider_id, api_key)
+            # Recreate agent with new provider
+            ChatHandler.agent = ChatAgent(self.config)
+
+        self._json(200, self.config.to_dict())
+
     def _json(self, code, data):
         body = json.dumps(data, ensure_ascii=False, indent=2)
         self.send_response(code)
@@ -295,7 +309,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body.encode())))
         self.end_headers()
         self.wfile.write(body.encode())
-    
+
     def _html(self, code, content):
         body = content.encode('utf-8')
         self.send_response(code)
@@ -307,29 +321,36 @@ class ChatHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='TinyLLM Web Chat Server')
+    parser = argparse.ArgumentParser(description='TinyLLM Web Chat Server (multi-backend)')
     parser.add_argument('--port', type=int, default=8421)
     parser.add_argument('--host', default='0.0.0.0')
-    parser.add_argument('--tokenizer', default='tokenizer')
-    parser.add_argument('--backend', default=None,
-                        help='C inference server URL (e.g. http://localhost:8420)')
+    parser.add_argument('--provider', default='template',
+                        help='Default provider: template, openai_compatible, tinyllm_c, or preset:openai')
+    parser.add_argument('--api-key', default='', help='API key for the provider (not saved to disk)')
     args = parser.parse_args()
-    
-    print("🤖 TinyLLM Web Chat Server")
+
+    print("🤖 TinyLLM Web Chat Server (multi-backend)")
     print("=" * 50)
     print(f"   🌐 http://{args.host}:{args.port}")
+    print(f"   🔀 Default provider: {args.provider}")
     print(f"   🔍 Web search: DuckDuckGo (free)")
     print(f"   🧠 Agent mode: enabled")
     print(f"   💬 Conversations: 24h TTL")
     print("=" * 50)
-    
-    # Setup agent and store
-    ChatHandler.agent = ChatAgent(args.tokenizer)
+
+    # Setup config, agent, store
+    config = ServerConfig()
+    if args.provider != 'template':
+        config.set_provider(args.provider, args.api_key or None)
+
+    ChatHandler.config = config
+    ChatHandler.agent = ChatAgent(config)
     ChatHandler.store = ConversationStore()
-    
+
     server = HTTPServer((args.host, args.port), ChatHandler)
-    print(f"\n✅ Server running. Open http://localhost:{args.port} in Chrome\n")
-    
+    print(f"\n✅ Server running. Open http://localhost:{args.port} in Chrome")
+    print(f"   ⚙️  Click the gear icon to switch models / set API key\n")
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
