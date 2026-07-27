@@ -284,13 +284,31 @@ class Phase6Orchestrator:
                 results.append({"name": call["name"], "error": error})
                 continue
             
-            # Execute (placeholder — actual execution would use tool.handler)
-            results.append({
-                "name": call["name"],
-                "params": call.get("params", {}),
-                "result": f"[Executed {call['name']}]",
-                "status": "ok",
-            })
+            # Execute tool via handler if available
+            handler = tool.handler
+            if handler and callable(handler):
+                try:
+                    result = handler(**call.get("params", {}))
+                    results.append({
+                        "name": call["name"],
+                        "params": call.get("params", {}),
+                        "result": str(result),
+                        "status": "ok",
+                    })
+                except Exception as e:
+                    results.append({
+                        "name": call["name"],
+                        "error": f"Tool execution failed: {e}",
+                        "status": "error",
+                    })
+            else:
+                # Fallback for tools without handlers
+                results.append({
+                    "name": call["name"],
+                    "params": call.get("params", {}),
+                    "result": f"[Tool '{call['name']}' has no handler — register one with tool_registry.register()]",
+                    "status": "unimplemented",
+                })
         
         return results
     

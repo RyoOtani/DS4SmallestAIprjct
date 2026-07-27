@@ -144,7 +144,8 @@ class ToolRegistry:
         return True
     
     def _register_builtins(self):
-        """Register standard code tools."""
+        """Register standard code tools with real handlers."""
+        import subprocess, os
         
         # File operations
         self.register(ToolDefinition(
@@ -156,6 +157,7 @@ class ToolRegistry:
                 ToolParam("start_line", ParamType.INTEGER, "Start line (1-indexed)", required=False, default=1),
                 ToolParam("end_line", ParamType.INTEGER, "End line (inclusive)", required=False, default=0),
             ],
+            handler=lambda path, start_line=1, end_line=0: _read_file(path, start_line, end_line),
         ))
         
         self.register(ToolDefinition(
@@ -166,6 +168,7 @@ class ToolRegistry:
                 ToolParam("path", ParamType.STRING, "Path to the file"),
                 ToolParam("content", ParamType.STRING, "Content to write"),
             ],
+            handler=lambda path, content: _write_file(path, content),
         ))
         
         self.register(ToolDefinition(
@@ -176,9 +179,10 @@ class ToolRegistry:
                 ToolParam("path", ParamType.STRING, "Path to the file to patch"),
                 ToolParam("patch", ParamType.STRING, "Unified diff patch to apply"),
             ],
+            handler=lambda path, patch: _apply_patch(path, patch),
         ))
         
-        # Code understanding
+        # Code search
         self.register(ToolDefinition(
             name="find_symbol",
             description="Find a symbol (function, class, variable) in the codebase.",
@@ -188,6 +192,45 @@ class ToolRegistry:
                 ToolParam("kind", ParamType.STRING, "Kind of symbol", required=False,
                           enum_values=["function", "class", "variable", "any"]),
             ],
+            handler=lambda name, kind="any": _find_symbol(name, kind),
+        ))
+        
+        self.register(ToolDefinition(
+            name="search_code",
+            description="Search for a pattern in the codebase.",
+            category="code",
+            parameters=[
+                ToolParam("pattern", ParamType.STRING, "Search pattern (regex or text)"),
+                ToolParam("file_pattern", ParamType.STRING, "File glob pattern", required=False, default="**/*"),
+                ToolParam("max_results", ParamType.INTEGER, "Max results", required=False, default=20),
+            ],
+            handler=lambda pattern, file_pattern="**/*", max_results=20: _search_code(pattern, file_pattern, max_results),
+        ))
+        
+        # System
+        self.register(ToolDefinition(
+            name="run_command",
+            description="Execute a shell command and return output.",
+            category="system",
+            parameters=[
+                ToolParam("command", ParamType.STRING, "Shell command to execute"),
+                ToolParam("cwd", ParamType.STRING, "Working directory", required=False, default="."),
+                ToolParam("timeout", ParamType.INTEGER, "Timeout in seconds", required=False, default=30),
+            ],
+            requires_sandbox=True,
+            handler=lambda command, cwd=".", timeout=30: _run_command(command, cwd, timeout),
+        ))
+        
+        self.register(ToolDefinition(
+            name="run_tests",
+            description="Run the test suite.",
+            category="system",
+            parameters=[
+                ToolParam("test_path", ParamType.STRING, "Path to test file or directory", required=False),
+                ToolParam("filter", ParamType.STRING, "Test name filter", required=False),
+            ],
+            requires_sandbox=True,
+            handler=lambda test_path=None, filter=None: _run_tests(test_path, filter),
         ))
         
         self.register(ToolDefinition(
@@ -340,3 +383,124 @@ class ToolCallParser:
         if '"name"' in text:
             return ToolCallParser.parse_openai(text)
         return []
+
+
+# ═══════════════════════════════════════════════════════════════
+# Built-in Tool Handlers
+# ═══════════════════════════════════════════════════════════════
+
+def _read_file(path: str, start_line: int = 1, end_line: int = 0) -> str:
+    """Read file contents, optionally with line range."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.readlines()
+        if end_line <= 0:
+            end_line = len(lines)
+        start = max(0, start_line - 1)
+        end = min(len(lines), end_line)
+        return ''.join(lines[start:end])
+    except FileNotFoundError:
+        return f"Error: File not found: {path}"
+    except Exception as e:
+        return f"Error reading {path}: {e}"
+
+
+def _write_file(path: str, content: str) -> str:
+    """Write content to a file."""
+    import os
+    try:
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return f"Wrote {len(content)} bytes to {path}"
+    except Exception as e:
+        return f"Error writing {path}: {e}"
+
+
+def _apply_patch(path: str, patch: str) -> str:
+    """Apply a unified diff patch."""
+    import subprocess, tempfile, os
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as f:
+            f.write(patch)
+            patch_file = f.name
+        result = subprocess.run(
+            ['patch', '-p1', '-i', patch_file, path],
+            capture_output=True, text=True, timeout=30
+        )
+        os.unlink(patch_file)
+        if result.returncode == 0:
+            return f"Patch applied to {path}"
+        return f"Patch failed: {result.stderr or result.stdout}"
+    except Exception as e:
+        return f"Error applying patch: {e}"
+
+
+def _find_symbol(name: str, kind: str = "any") -> str:
+    """Search for a symbol in the codebase using grep."""
+    import subprocess
+    try:
+        patterns = {
+            'function': rf'def\s+{name}\b|func\s+.*{name}\b|function\s+{name}\b',
+            'class': rf'class\s+{name}\b',
+            'variable': rf'\b{name}\s*=',
+            'any': rf'\b{name}\b',
+        }
+        pattern = patterns.get(kind, patterns['any'])
+        result = subprocess.run(
+            ['grep', '-rn', '--include=*.py', '--include=*.js', '--include=*.ts',
+             '--include=*.rs', '--include=*.go', '--include=*.c', '--include=*.h',
+             '-E', pattern, '.'],
+            capture_output=True, text=True, timeout=10
+        )
+        output = result.stdout.strip()
+        return output if output else f"No matches found for '{name}'"
+    except Exception as e:
+        return f"Symbol search failed: {e}"
+
+
+def _search_code(pattern: str, file_pattern: str = "**/*", max_results: int = 20) -> str:
+    """Search codebase for a pattern."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['grep', '-rn', '-m', str(max_results), pattern, '.'],
+            capture_output=True, text=True, timeout=15
+        )
+        output = result.stdout.strip()
+        return output[:5000] if output else f"No matches for '{pattern}'"
+    except Exception as e:
+        return f"Code search failed: {e}"
+
+
+def _run_command(command: str, cwd: str = ".", timeout: int = 30) -> str:
+    """Execute a shell command."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            cwd=cwd, timeout=timeout
+        )
+        output = result.stdout.strip()
+        if result.returncode != 0:
+            output += f"\n[stderr]\n{result.stderr.strip()}"
+        return output[:5000] if output else f"Command completed (exit {result.returncode})"
+    except subprocess.TimeoutExpired:
+        return f"Command timed out after {timeout}s"
+    except Exception as e:
+        return f"Command execution failed: {e}"
+
+
+def _run_tests(test_path: str = None, filter: str = None) -> str:
+    """Run Python tests."""
+    import subprocess
+    try:
+        cmd = ['python', '-m', 'pytest', '-q']
+        if test_path:
+            cmd.append(test_path)
+        if filter:
+            cmd.extend(['-k', filter])
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return result.stdout.strip()[-3000:] if result.stdout else f"Tests completed (exit {result.returncode})"
+    except Exception as e:
+        return f"Test execution failed: {e}"

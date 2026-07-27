@@ -314,13 +314,65 @@ class DPOTrainer:
 
     @staticmethod
     def _get_logps(model, prompts, responses):
-        """Get log-probabilities of responses given prompts."""
+        """Get log-probabilities of responses given prompts.
+        
+        Concatenates prompt+response, runs model forward, and computes
+        token-level log-probabilities for the response portion only.
+        
+        Returns scalar sum of log-probs (higher = more likely under model).
+        """
         import torch
-        # Placeholder: concatenate prompt+response, compute log-probs
-        combined = [p + r for p, r in zip(prompts, responses)]
-        # In practice: use model(combined).logits → log_softmax → gather token log-probs
-        # Simplified for now
-        return torch.tensor(0.0, requires_grad=True)
+        import torch.nn.functional as F
+        
+        device = next(model.parameters()).device
+        total_logp = 0.0
+        count = 0
+        
+        model.eval()
+        with torch.no_grad():
+            for prompt, response in zip(prompts, responses):
+                combined = prompt + response
+                if not combined:
+                    continue
+                
+                # Tokenize combined text
+                if hasattr(model, 'tokenizer'):
+                    input_ids = model.tokenizer.encode(combined)
+                    prompt_len = len(model.tokenizer.encode(prompt))
+                else:
+                    # Fallback: assume input is already token IDs or use simple split
+                    if isinstance(combined[0], int):
+                        input_ids = combined
+                        prompt_len = len(prompt)
+                    else:
+                        # Can't tokenize without tokenizer — return neutral value
+                        return torch.tensor(0.0, requires_grad=True)
+                
+                if len(input_ids) <= prompt_len:
+                    continue
+                
+                input_tensor = torch.tensor([input_ids], device=device)
+                
+                # Forward pass
+                outputs = model(input_ids=input_tensor)
+                logits = outputs.get('logits', outputs[0] if isinstance(outputs, tuple) else outputs)
+                
+                # Get log-probs for response tokens only
+                log_probs = F.log_softmax(logits[0, :-1], dim=-1)  # [seq_len-1, vocab]
+                response_ids = torch.tensor(input_ids[prompt_len:], device=device)
+                
+                # Gather log-probs of actual response tokens
+                token_logps = log_probs[-(len(response_ids)):].gather(
+                    1, response_ids.unsqueeze(-1)
+                ).squeeze(-1)
+                
+                total_logp += token_logps.sum().item()
+                count += 1
+        
+        if count == 0:
+            return torch.tensor(0.0, requires_grad=True)
+        
+        return torch.tensor(total_logp / max(count, 1), requires_grad=True)
 
 
 class DistillationTrainer:

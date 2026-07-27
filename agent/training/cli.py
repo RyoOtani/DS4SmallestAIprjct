@@ -95,16 +95,66 @@ def cmd_train(args):
         # Apply training method
         if preset.method == "lora":
             print("   Applying LoRA...")
-            # Placeholder: model = load_base_model(model_cfg)
-            # model, _ = LoRATrainer.apply_lora(model)
-            print("   (Model loading requires torch — run in full environment)")
+            try:
+                from transformers import AutoModelForCausalLM, AutoTokenizer
+                
+                # Try loading model from local path or HuggingFace
+                model_path = args.model_path or f"hf_models/tinyllm-{args.model_scale}"
+                print(f"   Loading model from: {model_path}")
+                
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model_path, use_fast=True, trust_remote_code=True
+                )
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype="auto",
+                    device_map="auto" if torch.cuda.is_available() else None,
+                    trust_remote_code=True,
+                )
+                
+                # Apply LoRA
+                model, lora_config = LoRATrainer.apply_lora(
+                    model, r=args.lora_r, alpha=args.lora_alpha
+                )
+                
+                trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                total = sum(p.numel() for p in model.parameters())
+                print(f"   ✅ Model loaded! Trainable: {trainable:,} / {total:,} ({100*trainable/total:.1f}%)")
+                
+                # Store for later use
+                loaded_model = model
+                loaded_tokenizer = tokenizer
+                
+            except ImportError:
+                print("   ⚠️  transformers not installed. Install with: pip install transformers peft")
+                print("   (Skipping model load — training not possible without dependencies)")
+            except Exception as e:
+                print(f"   ⚠️  Model load failed: {e}")
+                print(f"   Check --model-path or ensure model exists at {model_path}")
+                
         elif preset.method == "instruct":
             print(f"   Format: {args.instruct_format}")
             if args.data:
                 data = InstructionTuner.load_dataset(args.data, format=args.instruct_format)
                 print(f"   Loaded {len(data)} instruction samples")
-
-        print(f"\n   Ready to train! (connect data + model to proceed)")
+                
+                # Try loading model if available
+                try:
+                    from transformers import AutoModelForCausalLM, AutoTokenizer
+                    model_path = args.model_path or f"hf_models/tinyllm-{args.model_scale}"
+                    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_path, torch_dtype="auto",
+                        device_map="auto" if torch.cuda.is_available() else None,
+                    )
+                    print(f"   ✅ Model loaded from {model_path}")
+                except Exception:
+                    print(f"   ⚠️  Model not available — data prepared, training deferred")
+        
+        elif preset.method in ("dpo", "grpo", "distill"):
+            print(f"   Method '{preset.method}' requires specific trainer setup.")
+            print(f"   Use the dedicated training notebook or script for this method.")
+            print(f"   See: TINYLLM_TRAIN_BENCHMARK.ipynb")
 
     else:
         # Cloud or CPU training
@@ -135,6 +185,9 @@ def main():
     p = sub.add_parser("train", help="Launch training")
     p.add_argument("--preset","-p",default="lora-fast",help="Training preset")
     p.add_argument("--model-scale","-m",default="small")
+    p.add_argument("--model-path",default=None,help="Model path (local dir or HF name)")
+    p.add_argument("--lora-r",type=int,default=16,help="LoRA rank")
+    p.add_argument("--lora-alpha",type=int,default=32,help="LoRA alpha")
     p.add_argument("--data","-d",help="Training data path")
     p.add_argument("--provider",help="Cloud provider (runpod/vast/aws/...)")
     p.add_argument("--instruct-format",default="sharegpt")
