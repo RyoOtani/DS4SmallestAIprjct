@@ -271,13 +271,31 @@ def _log_moe_metrics(model, gpu_count):
         if not moe_found:
             return  # Dense model, skip MoE monitoring
         
-        # Collect metrics from first MoE layer
+        # Collect metrics from MoE layers via registered forward hooks
         with torch.no_grad():
-            for layer in m.layers:
+            moe_metrics = {}
+            for i, layer in enumerate(m.layers):
                 if hasattr(layer, 'moe') and hasattr(layer.moe, 'gate'):
-                    # We need recent gate outputs — stored during forward
-                    # For now, log a placeholder (full integration requires hook)
-                    pass
+                    gate = layer.moe.gate
+                    # Read gate logits if hook captured them
+                    if hasattr(gate, '_last_logits') and gate._last_logits is not None:
+                        logits = gate._last_logits.detach().float()
+                        # Expert usage: how often each expert is selected
+                        expert_usage = logits.softmax(dim=-1).mean(dim=0)  # avg over tokens
+                        top_experts = expert_usage.topk(min(4, len(expert_usage)))
+                        
+                        moe_metrics[f'layer_{i}'] = {
+                            'top_experts': top_experts.indices.tolist(),
+                            'top_weights': top_experts.values.tolist(),
+                            'entropy': float(-(expert_usage * (expert_usage + 1e-9).log()).sum()),
+                            'dead_experts': int((expert_usage < 0.001).sum().item()),
+                        }
+            
+            if moe_metrics:
+                wandb.log({'moe': moe_metrics}, step=global_step)
+                if global_step % 100 == 0:
+                    dead = sum(m['dead_experts'] for m in moe_metrics.values())
+                    print(f"   🧠 MoE: {len(moe_metrics)} layers, {dead} dead experts")
         
     except ImportError:
         pass  # MoE module not available

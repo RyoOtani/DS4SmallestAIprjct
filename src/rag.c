@@ -78,9 +78,15 @@ int tl_rag_search(tl_rag_index_t *rag, const float *query_emb, int top_k,
         scores[i].idx = i;
     }
 
-    /* Allocate output buffer stored in rag itself for reuse */
+    /* Verify embeddings exist; if not, return empty (semantic search disabled).
+       To enable: populate chunk->embedding with float vectors of emb_dim dimensions. */
     if (!rag->chunks[0].embedding && rag->n_chunks > 0) {
-        /* placeholder — embeddings exist per-chunk */
+        fprintf(stderr, "⚠️  RAG: no embeddings loaded — semantic search disabled.\n");
+        fprintf(stderr, "   Populate tl_rag_chunk_t.embedding (float[emb_dim]) to enable.\n");
+        *results = NULL;
+        tl_free(scores);
+        tl_free(taken);
+        return 0;
     }
 
     /* Reusable result buffer (stored on index, but this is a static helper) */
