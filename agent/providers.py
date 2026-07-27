@@ -195,7 +195,13 @@ PRESETS = {
     },
     "deepseek": {
         "type": "openai_compatible",
-        "label": "🐋 DeepSeek (V3)",
+        "label": "🐋 DeepSeek Reasoner (R1)",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-reasoner",
+    },
+    "deepseek-chat": {
+        "type": "openai_compatible",
+        "label": "🐋 DeepSeek Chat (V3)",
         "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-chat",
     },
