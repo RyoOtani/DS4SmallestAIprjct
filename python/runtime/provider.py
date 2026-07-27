@@ -6,6 +6,7 @@ coding agent use a stronger external model when desired.
 """
 from __future__ import annotations
 import json, os, subprocess, urllib.request
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -14,7 +15,7 @@ class ModelResponse:
     text: str
     raw: Any = None
 
-class Provider:
+class Provider(ABC):
     """Abstract base class for model providers.
     
     Concrete implementations:
@@ -22,8 +23,10 @@ class Provider:
       - OpenAICompatibleProvider (HTTP API)
     Use provider_from_env() for automatic selection.
     """
+    @abstractmethod
     def generate(self, prompt: str, system: str = "") -> ModelResponse:
-        raise NotImplementedError("Use CommandProvider or OpenAICompatibleProvider")
+        """Generate a response. Must be implemented by subclasses."""
+        ...
 
 class OpenAICompatibleProvider(Provider):
     def __init__(self, base_url: str, model: str, api_key: str = "", timeout: int = 120):

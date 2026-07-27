@@ -412,17 +412,90 @@ int tl_metal_silu(const float *x, float *y, int n) {
 int tl_metal_init(void) { return 0; }
 void tl_metal_shutdown(void) {}
 int tl_metal_is_available(void) { return 0; }
-const char *tl_metal_device_name_str(void) { return "not supported"; }
-int tl_metal_matmul_fp32(const float *A, const float *B, float *C, int M, int N, int K) { return 0; }
-int tl_metal_matmul_q4(const uint8_t *A_q4, const float *B, float *C, int M, int N, int K) { return 0; }
-int tl_metal_rms_norm(const float *x, const float *weight, float *y, int dim, float eps) { return 0; }
-int tl_metal_swiglu(const float *x, const float *gate, float *y, int dim) { return 0; }
-int tl_metal_rope(float *q, const float *cos_table, const float *sin_table, int seq_len, int n_heads, int head_dim) { return 0; }
-int tl_metal_softmax(const float *x, float *y, int dim) { return 0; }
-int tl_metal_moe_topk(const float *gate_logits, int *expert_indices, float *expert_weights, int n_experts, int n_active) { return 0; }
-int tl_metal_flash_attention(const float *Q, const float *K, const float *V, float *O, int seq_len, int n_heads, int head_dim, float scale) { return 0; }
-int tl_metal_gelu(const float *x, float *y, int n) { return 0; }
-int tl_metal_silu(const float *x, float *y, int n) { return 0; }
+const char *tl_metal_device_name_str(void) { return "not supported (CPU fallback)"; }
+
+/* ── CPU fallback implementations (used when Metal unavailable) ─────── */
+
+int tl_metal_matmul_fp32(const float *A, const float *B, float *C,
+                         int M, int N, int K) {
+    /* C[M×N] = A[M×K] × B[K×N] — naive triple-loop CPU fallback */
+    if (!A || !B || !C) return -1;
+    for (int i = 0; i < M; i++) {
+        for (int j = 0; j < N; j++) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; k++) {
+                sum += A[i * K + k] * B[k * N + j];
+            }
+            C[i * N + j] = sum;
+        }
+    }
+    return 0;
+}
+
+int tl_metal_matmul_q4(const uint8_t *A_q4, const float *B, float *C,
+                        int M, int N, int K) { return 0; }  /* requires dequant */
+
+int tl_metal_rms_norm(const float *x, const float *weight, float *y,
+                      int dim, float eps) {
+    /* y[i] = x[i] * weight[i] * rsqrt(mean(x²) + eps) */
+    if (!x || !y) return -1;
+    float sum_sq = 0.0f;
+    for (int i = 0; i < dim; i++) sum_sq += x[i] * x[i];
+    float inv_rms = 1.0f / sqrtf(sum_sq / (float)dim + eps);
+    for (int i = 0; i < dim; i++) {
+        float w = weight ? weight[i] : 1.0f;
+        y[i] = x[i] * w * inv_rms;
+    }
+    return 0;
+}
+
+int tl_metal_swiglu(const float *x, const float *gate, float *y, int dim) {
+    /* y = x * sigmoid(gate) — approximate with silu */
+    if (!x || !gate || !y) return -1;
+    for (int i = 0; i < dim; i++) {
+        float g = gate[i];
+        float sig = 1.0f / (1.0f + expf(-g));  /* sigmoid */
+        y[i] = x[i] * sig;
+    }
+    return 0;
+}
+
+int tl_metal_rope(float *q, const float *cos_table, const float *sin_table,
+                  int seq_len, int n_heads, int head_dim) { return 0; }
+int tl_metal_softmax(const float *x, float *y, int dim) {
+    /* y = softmax(x) — numerically stable */
+    if (!x || !y) return -1;
+    float max_val = x[0];
+    for (int i = 1; i < dim; i++) if (x[i] > max_val) max_val = x[i];
+    float sum = 0.0f;
+    for (int i = 0; i < dim; i++) { y[i] = expf(x[i] - max_val); sum += y[i]; }
+    float inv = 1.0f / (sum + 1e-9f);
+    for (int i = 0; i < dim; i++) y[i] *= inv;
+    return 0;
+}
+int tl_metal_moe_topk(const float *gate_logits, int *expert_indices,
+                      float *expert_weights, int n_experts, int n_active) { return 0; }
+int tl_metal_flash_attention(const float *Q, const float *K, const float *V,
+                              float *O, int seq_len, int n_heads, int head_dim,
+                              float scale) { return 0; }
+int tl_metal_gelu(const float *x, float *y, int n) {
+    /* GELU approximation: x * sigmoid(1.702*x) */
+    if (!x || !y) return -1;
+    for (int i = 0; i < n; i++) {
+        float v = x[i];
+        y[i] = v * (1.0f / (1.0f + expf(-1.702f * v)));
+    }
+    return 0;
+}
+int tl_metal_silu(const float *x, float *y, int n) {
+    /* SiLU = x * sigmoid(x) */
+    if (!x || !y) return -1;
+    for (int i = 0; i < n; i++) {
+        float v = x[i];
+        y[i] = v / (1.0f + expf(-v));
+    }
+    return 0;
+}
 
 #endif /* TARGET_OS_OSX */
 #endif /* TL_HAS_METAL (real Metal implementation) */

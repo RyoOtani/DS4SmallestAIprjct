@@ -11,6 +11,7 @@ import json
 import os
 import re
 from collections import defaultdict
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -59,7 +60,7 @@ class Dependency:
     target_name: str = ""
 
 
-class ASTParser:
+class ASTParser(ABC):
     """Base AST parser with language-specific backends."""
     
     def __init__(self, filepath: str):

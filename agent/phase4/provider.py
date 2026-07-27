@@ -3,18 +3,19 @@ import json
 import os
 import urllib.request
 import urllib.error
+from abc import ABC, abstractmethod
 
-class LLMProvider:
+class LLMProvider(ABC):
     """Abstract base class for LLM providers.
     
     Concrete implementations:
       - OpenAICompatibleProvider (HTTP API)
       - MockProvider (testing)
-    
-    Not meant to be instantiated directly.
     """
+    @abstractmethod
     def complete(self, messages, **kwargs):
-        raise NotImplementedError("Use OpenAICompatibleProvider or MockProvider")
+        """Complete a chat. Must be implemented by subclasses."""
+        ...
 
 class OpenAICompatibleProvider(LLMProvider):
     """Works with OpenAI-compatible /v1/chat/completions endpoints."""

@@ -8,6 +8,7 @@ Without a provider, roles fall back to template-based responses.
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from abc import ABC, abstractmethod
 
 @dataclass
 class RoleResult:
@@ -17,20 +18,21 @@ class RoleResult:
     data: Dict[str, Any]
 
 
-class BaseRole:
+class BaseRole(ABC):
     """Abstract base for multi-agent roles.
     
     Subclasses (Planner, Architect, Coder, Tester, Critic, Evaluator, Debugger)
     implement run() with optional LLM provider integration.
-    Without a provider, roles fall back to template-based responses.
     """
     name = "base"
 
     def __init__(self, provider=None):
         self.provider = provider
 
+    @abstractmethod
     def run(self, context: Dict[str, Any]) -> RoleResult:
-        raise NotImplementedError("Use Planner/Coder/Tester/etc. subclass")
+        """Execute the role. Must be implemented by subclasses."""
+        ...
 
     def _ask_llm(self, system: str, prompt: str) -> Optional[str]:
         """Query LLM if provider is available."""
