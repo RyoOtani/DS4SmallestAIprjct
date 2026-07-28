@@ -31,8 +31,9 @@ if str(_REPO) not in sys.path:
 
 from agent.web_search import search_and_summarize, web_search, fetch_page
 from agent.providers import (
-    BaseProvider, TemplateProvider, OpenAICompatibleProvider, TinyLLMCProvider,
-    create_provider, create_from_preset, list_providers, PRESETS,
+    BaseProvider, FallbackProvider, RuleBasedProvider,
+    TinyLLMProvider, OpenAICompatProvider, AnthropicProvider, GoogleProvider,
+    create_provider, create_fallback_chain, list_providers, PRESETS,
 )
 
 
@@ -43,41 +44,34 @@ from agent.providers import (
 class ServerConfig:
     """Runtime config: selected provider, API keys (never written to disk)."""
     def __init__(self):
-        self.provider_id = "template"
+        self.provider_id = "rule_based"
         self.api_key = ""
-        self.provider: BaseProvider = TemplateProvider()
+        self.provider: BaseProvider = RuleBasedProvider()
+        self.fallback_mode = False  # True = use fallback chain
 
     def to_dict(self) -> dict:
         return {
             "provider_id": self.provider_id,
             "has_api_key": bool(self.api_key),
             "provider_label": self.provider.label,
+            "fallback_mode": self.fallback_mode,
         }
 
     def set_provider(self, provider_id: str, api_key: str = None):
-        """Switch to a different provider."""
+        """Switch to a different provider or fallback chain."""
         if api_key is not None and api_key.strip():
             self.api_key = api_key.strip()
 
         self.provider_id = provider_id
 
-        if provider_id.startswith("preset:"):
-            preset_name = provider_id.split(":", 1)[1]
-            self.provider = create_from_preset(preset_name, self.api_key)
-        elif provider_id == "openai_compatible":
-            # Custom OpenAI-compatible — use env vars or defaults
-            self.provider = OpenAICompatibleProvider(
-                api_key=self.api_key,
-                base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-                model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
-            )
-        elif provider_id == "tinyllm_c":
-            self.provider = TinyLLMCProvider(
-                server_url=os.environ.get("TINYLLM_SERVER", "http://localhost:8420")
-            )
+        if provider_id == "fallback":
+            # Create fallback chain: TinyLLM → DeepSeek → OpenAI → Groq → RuleBased
+            self.provider = create_fallback_chain(self.api_key)
+            self.fallback_mode = True
         else:
-            self.provider = create_provider(provider_id, api_key=self.api_key)
-        
+            self.provider = create_provider(provider_id, self.api_key)
+            self.fallback_mode = False
+
         print(f"🔀 Provider switched to: {self.provider.label}")
 
 
@@ -191,13 +185,24 @@ class ChatAgent:
 
         # ── Get response from provider ─────────────────
         try:
-            response = self.config.provider.chat(
+            result_text, success = self.config.provider.chat(
                 prompt=full_prompt,
                 history=history,
                 system_prompt=SYSTEM_PROMPT,
             )
+            if not success:
+                # Provider returned error — use RuleBased as ultimate fallback
+                response = result_text  # Contains error message
+            else:
+                response = result_text
         except Exception as e:
             response = f"⚠️ モデルエラー: {e}"
+
+        # ── If we're in fallback mode, note which provider was used ──
+        if self.config.fallback_mode and hasattr(self.config.provider, 'last_label'):
+            provider_label = self.config.provider.last_label
+        else:
+            provider_label = self.config.provider.label
 
         # ── Agent mode wrapping ───────────────────────
         if agent_mode:
@@ -219,7 +224,7 @@ class ChatAgent:
             "usage": usage,
             "web_search_used": bool(search_context),
             "agent_mode": agent_mode,
-            "provider": self.config.provider.label,
+            "provider": provider_label,
         }
 
 
@@ -340,8 +345,8 @@ def main():
     parser = argparse.ArgumentParser(description='TinyLLM Web Chat Server (multi-backend)')
     parser.add_argument('--port', type=int, default=8421)
     parser.add_argument('--host', default='0.0.0.0')
-    parser.add_argument('--provider', default='template',
-                        help='Default provider: template, openai_compatible, tinyllm_c, or preset:openai')
+    parser.add_argument('--provider', default='rule_based',
+                        help='Default provider: rule_based, fallback, tinyllm, deepseek, openai, claude, gemini, groq, etc.')
     parser.add_argument('--api-key', default='', help='API key for the provider (not saved to disk)')
     args = parser.parse_args()
 
@@ -356,7 +361,7 @@ def main():
 
     # Setup config, agent, store
     config = ServerConfig()
-    if args.provider != 'template':
+    if args.provider != 'rule_based':
         config.set_provider(args.provider, args.api_key or None)
 
     ChatHandler.config = config

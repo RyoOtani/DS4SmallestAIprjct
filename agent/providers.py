@@ -1,277 +1,350 @@
 """
-providers.py — Multi-backend LLM providers for TinyLLM Chat.
+providers.py — Abstract LLM Provider Architecture with Fallback Chains.
 
-Supported backends:
-  - openai_compatible : OpenAI / DeepSeek / Groq / local LLM with OpenAI API
-  - tinyllm_c         : TinyLLM C inference server (src/http.c, port 8420)
-  - template          : Template-based responses (no model, offline demo)
+Architecture:
+  BaseProvider (ABC)
+  ├── TinyLLMProvider      — Self-hosted C inference server
+  ├── OpenAICompatProvider  — OpenAI / DeepSeek / Groq / Ollama / etc.
+  ├── AnthropicProvider     — Claude (Anthropic API)
+  ├── GoogleProvider        — Gemini (Google AI API)
+  ├── RuleBasedProvider     — Keyword/template matching (always works)
+  └── FallbackProvider      — Chains multiple providers with failover
+
+Typical fallback chain:
+  TinyLLM (self) → DeepSeek → OpenAI → Groq → RuleBased (safe)
 """
-
-import json, os, re
-from pathlib import Path
-from typing import List, Dict, Optional
+from abc import ABC, abstractmethod
+import json, os, re, time
+from typing import List, Dict, Optional, Tuple
 from urllib.request import Request, urlopen
-from urllib.error import URLError
-
+from urllib.error import URLError, HTTPError
 
 # ═══════════════════════════════════════════════════════════
-# Base Provider
+# Helpers
 # ═══════════════════════════════════════════════════════════
+def _ok(text: str) -> Tuple[str, bool]: return (text, True)
+def _fail(text: str) -> Tuple[str, bool]: return (text, False)
 
-class BaseProvider:
-    """Abstract base for all LLM backends."""
+# ═══════════════════════════════════════════════════════════
+# 1. Abstract Base Provider
+# ═══════════════════════════════════════════════════════════
+class BaseProvider(ABC):
     name: str = "base"
-    label: str = "Base"
+    label: str = "Base Provider"
+    requires_api_key: bool = False
 
+    @abstractmethod
     def chat(self, prompt: str, history: List[dict] = None,
              system_prompt: str = "", max_tokens: int = 1024,
-             temperature: float = 0.7) -> str:
-        raise NotImplementedError
+             temperature: float = 0.7) -> Tuple[str, bool]:
+        """Returns (response_text, success)."""
+        ...
 
-
-# ═══════════════════════════════════════════════════════════
-# Template Provider (no model — current behavior)
-# ═══════════════════════════════════════════════════════════
-
-class TemplateProvider(BaseProvider):
-    """Keyword-matching template responses. No LLM, works offline."""
-    name = "template"
-    label = "🧩 テンプレート (オフライン)"
-
-    def chat(self, prompt: str, history: List[dict] = None,
-             system_prompt: str = "", max_tokens: int = 1024,
-             temperature: float = 0.7) -> str:
-        p = prompt.lower()
-
-        if any(w in p for w in ['こんにちは', 'hello', 'hi', 'hey']):
-            return "こんにちは！TinyLLM チャットへようこそ。右下の⚙️設定からモデルを切り替えられます。何かお手伝いしましょうか？"
-
-        if any(w in p for w in ['何ができる', 'できること', '機能', 'help']):
-            return """🌐 **Web検索**: DuckDuckGo でリアルタイム検索
-🧠 **エージェントモード**: 複数ステップの推論
-🤖 **モデル切替**: OpenAI / DeepSeek / TinyLLM を選択可能
-🔑 **APIキー**: 設定画面から自分のAPIキーを登録
-
-右下の ⚙️ アイコンから設定を開けます。"""
-
-        if any(w in p for w in ['コード', 'code', 'python', '関数']):
-            return '```python\ndef hello(name: str) -> str:\n    return f"こんにちは、{name}さん！"\n```\n\nより高度なコード生成には、OpenAI か TinyLLM モデルを選択してください。'
-
-        if any('\u3040' <= c <= '\u30ff' for c in prompt):
-            return f"「{prompt[:100]}」についてのお問い合わせですね。\n\n⚙️設定から **OpenAI** や **TinyLLM** モデルを選択すると、AIが直接回答を生成します。"
-
-        return f"I understand: _{prompt[:200]}_\n\n💡 Open ⚙️ Settings to connect an AI model for intelligent responses."
-
+    def is_available(self) -> bool:
+        return True
 
 # ═══════════════════════════════════════════════════════════
-# OpenAI-Compatible Provider
+# 2. TinyLLM Provider (self-hosted C inference)
 # ═══════════════════════════════════════════════════════════
+class TinyLLMProvider(BaseProvider):
+    name = "tinyllm"
+    label = "🦾 TinyLLM-nano (自前モデル)"
+    requires_api_key = False
 
-class OpenAICompatibleProvider(BaseProvider):
-    """
-    OpenAI / DeepSeek / Groq / local (Ollama, vLLM) — anything with
-    a /v1/chat/completions endpoint.
-    """
-    name = "openai_compatible"
-    label = "🤖 OpenAI互換API"
-
-    def __init__(self, api_key: str = "", base_url: str = "",
-                 model: str = "", label: str = ""):
-        self.api_key = api_key
-        self.base_url = base_url.rstrip('/')
-        self.model = model
-        if label:
-            self.label = label
-
-    def chat(self, prompt: str, history: List[dict] = None,
-             system_prompt: str = "", max_tokens: int = 1024,
-             temperature: float = 0.7) -> str:
-        if not self.api_key:
-            return "⚠️ APIキーが設定されていません。⚙️設定からAPIキーを入力してください。"
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": prompt})
-
-        body = json.dumps({
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        })
-
-        try:
-            req = Request(
-                f"{self.base_url}/chat/completions",
-                data=body.encode(),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}",
-                },
-            )
-            with urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode())
-                return data["choices"][0]["message"]["content"]
-        except URLError as e:
-            return f"⚠️ API接続エラー: {e}\n\nbase_url=`{self.base_url}` が正しいか確認してください。"
-        except Exception as e:
-            return f"⚠️ APIエラー: {e}"
-
-
-# ═══════════════════════════════════════════════════════════
-# TinyLLM C Inference Server Provider
-# ═══════════════════════════════════════════════════════════
-
-class TinyLLMCProvider(BaseProvider):
-    """Connect to TinyLLM C inference server (src/http.c)."""
-    name = "tinyllm_c"
-    label = "🦾 TinyLLM (C推論サーバー)"
-
-    def __init__(self, server_url: str = "http://localhost:8420"):
+    def __init__(self, server_url: str = "http://localhost:8420", timeout: int = 120):
         self.server_url = server_url.rstrip('/')
+        self.timeout = timeout
 
-    def chat(self, prompt: str, history: List[dict] = None,
-             system_prompt: str = "", max_tokens: int = 1024,
-             temperature: float = 0.7) -> str:
-        # Format with system prompt for the raw completion endpoint
+    def is_available(self) -> bool:
+        try:
+            req = Request(f"{self.server_url}/health")
+            with urlopen(req, timeout=3) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    def chat(self, prompt: str, history=None, system_prompt="",
+             max_tokens=1024, temperature=0.7) -> Tuple[str, bool]:
         full_prompt = prompt
         if system_prompt:
             full_prompt = f"{system_prompt}\n\nUser: {prompt}\nAssistant:"
-
-        # Build conversation context from history
         if history:
-            ctx_parts = []
-            for msg in history[-6:]:  # last 6 messages
-                role = "User" if msg["role"] == "user" else "Assistant"
-                ctx_parts.append(f"{role}: {msg['content']}")
-            full_prompt = "\n".join(ctx_parts) + f"\nUser: {prompt}\nAssistant:"
-
-        body = json.dumps({
-            "prompt": full_prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        })
-
+            ctx = "\n".join(
+                f"{'User' if m['role']=='user' else 'Assistant'}: {m['content']}"
+                for m in history[-6:]
+            )
+            full_prompt = f"{ctx}\nUser: {prompt}\nAssistant:"
         try:
-            req = Request(
-                f"{self.server_url}/v1/completions",
-                data=body.encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            with urlopen(req, timeout=120) as resp:
+            body = json.dumps({"prompt": full_prompt, "max_tokens": max_tokens,
+                               "temperature": temperature}).encode()
+            req = Request(f"{self.server_url}/v1/completions", data=body,
+                          headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
-                # C server returns {"text": "..."} or {"choices": [{"text": "..."}]}
-                if "text" in data:
-                    return data["text"]
-                if "choices" in data:
-                    return data["choices"][0].get("text", "")
-                return json.dumps(data, ensure_ascii=False)
+                text = data.get("text") or data.get("choices", [{}])[0].get("text", "")
+                return _ok(text) if text.strip() else _fail("(TinyLLM empty)")
         except URLError as e:
-            return f"⚠️ TinyLLMサーバーに接続できません: {e}\n\n`make run` でC推論サーバーを起動してください。(port {self.server_url.split(':')[-1]})"
+            return _fail(f"TinyLLM unreachable: {e}")
         except Exception as e:
-            return f"⚠️ TinyLLMエラー: {e}"
-
+            return _fail(f"TinyLLM error: {e}")
 
 # ═══════════════════════════════════════════════════════════
-# Provider Registry & Factory
+# 3. OpenAI-Compatible Provider
 # ═══════════════════════════════════════════════════════════
+class OpenAICompatProvider(BaseProvider):
+    name = "openai_compat"
+    label = "🤖 OpenAI互換API"
+    requires_api_key = True
 
-BUILTIN_PROVIDERS: Dict[str, type] = {
-    "template": TemplateProvider,
-    "openai_compatible": OpenAICompatibleProvider,
-    "tinyllm_c": TinyLLMCProvider,
-}
+    def __init__(self, api_key="", base_url="", model="gpt-4o", label="", timeout=60):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip('/')
+        self.model = model
+        self.timeout = timeout
+        if label: self.label = label
 
-# Preset configurations for popular APIs
+    def is_available(self) -> bool:
+        return bool(self.api_key and self.base_url)
+
+    def chat(self, prompt: str, history=None, system_prompt="",
+             max_tokens=1024, temperature=0.7) -> Tuple[str, bool]:
+        if not self.api_key:
+            return _fail("API key not set")
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        if history: messages.extend(history)
+        messages.append({"role": "user", "content": prompt})
+        try:
+            body = json.dumps({"model": self.model, "messages": messages,
+                               "max_tokens": max_tokens, "temperature": temperature}).encode()
+            req = Request(f"{self.base_url}/chat/completions", data=body,
+                          headers={"Content-Type": "application/json",
+                                   "Authorization": f"Bearer {self.api_key}"})
+            with urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+                text = data["choices"][0]["message"]["content"]
+                return _ok(text) if text.strip() else _fail("(empty)")
+        except HTTPError as e:
+            err = e.read().decode(errors='replace')[:200]
+            return _fail(f"HTTP {e.code}: {err}")
+        except Exception as e:
+            return _fail(f"API error: {e}")
+
+# ═══════════════════════════════════════════════════════════
+# 4. Anthropic Provider (Claude)
+# ═══════════════════════════════════════════════════════════
+class AnthropicProvider(BaseProvider):
+    name = "anthropic"
+    label = "🧠 Claude (Anthropic)"
+    requires_api_key = True
+
+    def __init__(self, api_key="", model="claude-sonnet-4-20250514", timeout=60):
+        self.api_key = api_key; self.model = model; self.timeout = timeout
+
+    def is_available(self) -> bool: return bool(self.api_key)
+
+    def chat(self, prompt: str, history=None, system_prompt="",
+             max_tokens=1024, temperature=0.7) -> Tuple[str, bool]:
+        if not self.api_key: return _fail("Claude API key not set")
+        messages = []
+        if history:
+            for m in history:
+                messages.append({"role": m["role"], "content": m["content"]})
+        messages.append({"role": "user", "content": prompt})
+        try:
+            body_data = {"model": self.model, "max_tokens": max_tokens, "messages": messages}
+            if system_prompt: body_data["system"] = system_prompt
+            body = json.dumps(body_data).encode()
+            req = Request("https://api.anthropic.com/v1/messages", data=body,
+                          headers={"Content-Type": "application/json",
+                                   "x-api-key": self.api_key,
+                                   "anthropic-version": "2023-06-01"})
+            with urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+                text = data["content"][0]["text"]
+                return _ok(text) if text.strip() else _fail("(Claude empty)")
+        except Exception as e:
+            return _fail(f"Claude error: {e}")
+
+# ═══════════════════════════════════════════════════════════
+# 5. Google Provider (Gemini)
+# ═══════════════════════════════════════════════════════════
+class GoogleProvider(BaseProvider):
+    name = "google"
+    label = "🌌 Gemini (Google)"
+    requires_api_key = True
+
+    def __init__(self, api_key="", model="gemini-2.5-flash", timeout=60):
+        self.api_key = api_key; self.model = model; self.timeout = timeout
+
+    def is_available(self) -> bool: return bool(self.api_key)
+
+    def chat(self, prompt: str, history=None, system_prompt="",
+             max_tokens=1024, temperature=0.7) -> Tuple[str, bool]:
+        if not self.api_key: return _fail("Gemini API key not set")
+        contents = []
+        if history:
+            for m in history:
+                role = "user" if m["role"] == "user" else "model"
+                contents.append({"role": role, "parts": [{"text": m["content"]}]})
+        contents.append({"role": "user", "parts": [{"text": prompt}]})
+        try:
+            body_data = {"contents": contents,
+                         "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature}}
+            if system_prompt:
+                body_data["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+            body = json.dumps(body_data).encode()
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+            req = Request(url, data=body, headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                return _ok(text) if text.strip() else _fail("(Gemini empty)")
+        except Exception as e:
+            return _fail(f"Gemini error: {e}")
+
+# ═══════════════════════════════════════════════════════════
+# 6. Rule-Based Provider (always works)
+# ═══════════════════════════════════════════════════════════
+class RuleBasedProvider(BaseProvider):
+    name = "rule_based"
+    label = "🧩 ルールベース (安全処理)"
+    requires_api_key = False
+
+    def chat(self, prompt: str, history=None, system_prompt="",
+             max_tokens=1024, temperature=0.7) -> Tuple[str, bool]:
+        p = prompt.lower().strip()
+
+        if any(w in p for w in ['こんにちは', 'hello', 'hi', 'hey', 'やあ']):
+            return _ok("こんにちは！現在ルールベースモードです。⚙️設定からAPIキーを登録するとAIが応答します。")
+
+        if any(w in p for w in ['何ができる', 'できること', '機能', 'help']):
+            return _ok("🧩 ルールベースモード | 🌐 Web検索 | 🔀 マルチプロバイダー\n⚙️設定から DeepSeek/OpenAI/Claude/Gemini を接続可能")
+
+        m = re.match(r'(\d+)\s*([\+\-\*/×÷])\s*(\d+)', p)
+        if m:
+            a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
+            if op in ('+','＋'): r = a + b
+            elif op in ('-','－','−'): r = a - b
+            elif op in ('*','×','＊'): r = a * b
+            elif op in ('/','÷','／'): r = a // b if b else "undefined"
+            return _ok(f"{a} {op} {b} = **{r}**")
+
+        if any(w in p for w in ['時間', 'いま', '今', 'time']):
+            return _ok(f"現在時刻: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+
+        if any('\u3040' <= c <= '\u30ff' for c in prompt):
+            return _ok(f"「{prompt[:100]}」についてのお問い合わせですね。\n\n⚠️ ルールベースモードです。⚙️設定からAPIキーを登録してください。")
+
+        return _ok(f"Received: _{prompt[:200]}_\n\n⚠️ Rule-based mode. Add API key in ⚙️ Settings.")
+
+# ═══════════════════════════════════════════════════════════
+# 7. Fallback Provider (chains providers)
+# ═══════════════════════════════════════════════════════════
+class FallbackProvider(BaseProvider):
+    """
+    Chains providers. Tries each in order.
+    All fail → returns safe minimum response.
+    """
+    name = "fallback"
+    label = "🔀 自動フォールバック"
+    requires_api_key = True
+
+    def __init__(self, providers: List[BaseProvider] = None):
+        self.providers = providers or []
+        self._last: Optional[BaseProvider] = None
+
+    def chat(self, prompt: str, history=None, system_prompt="",
+             max_tokens=1024, temperature=0.7) -> Tuple[str, bool]:
+        errors = []
+        for i, p in enumerate(self.providers):
+            if not p.is_available():
+                errors.append(f"{p.label}: not available")
+                continue
+            try:
+                text, ok = p.chat(prompt, history, system_prompt, max_tokens, temperature)
+                if ok and text.strip():
+                    self._last = p
+                    if i > 0:
+                        return _ok(f"*(via {p.label})*\n\n{text}")
+                    return _ok(text)
+                errors.append(f"{p.label}: {text}")
+            except Exception as e:
+                errors.append(f"{p.label}: {type(e).__name__}: {e}")
+
+        self._last = None
+        fallback = (
+            "⚠️ **全AIモデルに接続できませんでした。**\n\n"
+            + "\n".join(f"- {e}" for e in errors) +
+            "\n\n💡 インターネット接続と⚙️設定のAPIキーを確認してください"
+        )
+        return _fail(fallback)
+
+    @property
+    def last_label(self) -> str:
+        return self._last.label if self._last else "⚠️ 全失敗"
+
+# ═══════════════════════════════════════════════════════════
+# Presets
+# ═══════════════════════════════════════════════════════════
 PRESETS = {
-    "openai": {
-        "type": "openai_compatible",
-        "label": "🤖 OpenAI (GPT-4o)",
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4o",
-    },
-    "deepseek": {
-        "type": "openai_compatible",
-        "label": "🐋 DeepSeek Reasoner (R1)",
-        "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-reasoner",
-    },
-    "deepseek-chat": {
-        "type": "openai_compatible",
-        "label": "🐋 DeepSeek Chat (V3)",
-        "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-chat",
-    },
-    "groq": {
-        "type": "openai_compatible",
-        "label": "⚡ Groq (Llama 3)",
-        "base_url": "https://api.groq.com/openai/v1",
-        "model": "llama-3.1-70b-versatile",
-    },
-    "openrouter": {
-        "type": "openai_compatible",
-        "label": "🔀 OpenRouter",
-        "base_url": "https://openrouter.ai/api/v1",
-        "model": "openai/gpt-4o",
-    },
-    "tinyllm": {
-        "type": "tinyllm_c",
-        "label": "🦾 TinyLLM-nano (1.5B)",
-        "server_url": "http://localhost:8420",
-    },
-    "ollama": {
-        "type": "openai_compatible",
-        "label": "🦙 Ollama (ローカル)",
-        "base_url": "http://localhost:11434/v1",
-        "model": "llama3",
-    },
+    "tinyllm":      {"type": "tinyllm", "label": "🦾 TinyLLM-nano (自前1.5B)", "server_url": "http://localhost:8420"},
+    "deepseek":     {"type": "openai_compat", "label": "🐋 DeepSeek Reasoner (R1)", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-reasoner"},
+    "deepseek-chat":{"type": "openai_compat", "label": "🐋 DeepSeek Chat (V3)", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat"},
+    "openai":       {"type": "openai_compat", "label": "🤖 OpenAI (GPT-4o)", "base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
+    "groq":         {"type": "openai_compat", "label": "⚡ Groq (Llama 3.1)", "base_url": "https://api.groq.com/openai/v1", "model": "llama-3.1-70b-versatile"},
+    "openrouter":   {"type": "openai_compat", "label": "🔀 OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model": "openai/gpt-4o"},
+    "ollama":       {"type": "openai_compat", "label": "🦙 Ollama (ローカル)", "base_url": "http://localhost:11434/v1", "model": "llama3"},
+    "claude":       {"type": "anthropic", "label": "🧠 Claude Sonnet 4", "model": "claude-sonnet-4-20250514"},
+    "gemini":       {"type": "google", "label": "🌌 Gemini 2.5 Flash", "model": "gemini-2.5-flash"},
+    "rule_based":   {"type": "rule_based", "label": "🧩 ルールベース (安全処理)"},
 }
 
+# ═══════════════════════════════════════════════════════════
+# Factory
+# ═══════════════════════════════════════════════════════════
+def create_provider(provider_id: str, api_key: str = "", base_url: str = "") -> BaseProvider:
+    if provider_id.startswith("preset:"):
+        provider_id = provider_id.split(":", 1)[1]
+    preset = PRESETS.get(provider_id, {})
+    ptype = preset.get("type", provider_id)
 
-def create_provider(provider_type: str, **kwargs) -> BaseProvider:
-    """Factory: create a provider instance from type and config."""
-    if provider_type in BUILTIN_PROVIDERS:
-        cls = BUILTIN_PROVIDERS[provider_type]
-        if provider_type == "openai_compatible":
-            return cls(
-                api_key=kwargs.get("api_key", ""),
-                base_url=kwargs.get("base_url", "https://api.openai.com/v1"),
-                model=kwargs.get("model", "gpt-4o"),
-                label=kwargs.get("label", ""),
-            )
-        elif provider_type == "tinyllm_c":
-            return cls(server_url=kwargs.get("server_url", "http://localhost:8420"))
-        else:
-            return cls()
-    # Fallback to template
-    return TemplateProvider()
+    if ptype == "tinyllm":
+        return TinyLLMProvider(preset.get("server_url", "http://localhost:8420"))
+    elif ptype == "openai_compat":
+        return OpenAICompatProvider(
+            api_key=api_key,
+            base_url=base_url or preset.get("base_url", "https://api.openai.com/v1"),
+            model=preset.get("model", "gpt-4o"),
+            label=preset.get("label", ""),
+        )
+    elif ptype == "anthropic":
+        return AnthropicProvider(api_key=api_key, model=preset.get("model", "claude-sonnet-4-20250514"))
+    elif ptype == "google":
+        return GoogleProvider(api_key=api_key, model=preset.get("model", "gemini-2.5-flash"))
+    elif ptype == "rule_based":
+        return RuleBasedProvider()
+    else:
+        return RuleBasedProvider()
 
-
-def create_from_preset(preset_name: str, api_key: str = "") -> BaseProvider:
-    """Create a provider from a named preset + user's API key."""
-    preset = PRESETS.get(preset_name, {})
-    ptype = preset.get("type", "template")
-    kwargs = {k: v for k, v in preset.items() if k not in ("type", "label")}
-    kwargs["api_key"] = api_key
-    kwargs["label"] = preset.get("label", "")
-    return create_provider(ptype, **kwargs)
-
+def create_fallback_chain(api_key: str = "",
+                          tinyllm_url: str = "http://localhost:8420") -> FallbackProvider:
+    return FallbackProvider([
+        TinyLLMProvider(tinyllm_url),
+        OpenAICompatProvider(api_key, "https://api.deepseek.com/v1", "deepseek-reasoner", "🐋 DeepSeek R1"),
+        OpenAICompatProvider(api_key, "https://api.openai.com/v1", "gpt-4o", "🤖 OpenAI GPT-4o"),
+        OpenAICompatProvider(api_key, "https://api.groq.com/openai/v1", "llama-3.1-70b-versatile", "⚡ Groq"),
+        RuleBasedProvider(),
+    ])
 
 def list_providers() -> List[dict]:
-    """List all available providers for the UI."""
-    providers = []
-    # Built-in types
-    for name, cls in BUILTIN_PROVIDERS.items():
-        providers.append({"id": name, "label": cls.label, "requires_api_key": name == "openai_compatible"})
-    # Presets
-    for name, preset in PRESETS.items():
-        providers.append({
-            "id": f"preset:{name}",
-            "label": preset.get("label", name),
-            "requires_api_key": preset.get("type") == "openai_compatible",
-            "preset": name,
-        })
+    providers = [
+        {"id": "fallback", "label": "🔀 自動フォールバック (推奨)", "requires_api_key": True},
+        {"id": "tinyllm", "label": "🦾 TinyLLM-nano (自前1.5B)", "requires_api_key": False},
+    ]
+    for pid in ["deepseek", "deepseek-chat", "openai", "groq", "openrouter", "ollama", "claude", "gemini"]:
+        p = PRESETS.get(pid, {})
+        providers.append({"id": pid, "label": p.get("label", pid), "requires_api_key": p.get("type") != "tinyllm"})
+    providers.append({"id": "rule_based", "label": "🧩 ルールベース (安全処理)", "requires_api_key": False})
     return providers

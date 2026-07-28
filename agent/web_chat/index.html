@@ -195,7 +195,7 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
   <h1>TinyLLM Chat</h1>
   <span class="spacer"></span>
   <button class="model-badge" id="modelBadge" onclick="openSettings()">
-    <span class="dot"></span><span id="modelLabel">Template</span>
+    <span class="dot" id="providerDot"></span><span id="modelLabel">🧩 RuleBased</span>
   </button>
   <button class="settings-btn" onclick="openSettings()" title="設定">⚙️</button>
 </header>
@@ -355,7 +355,13 @@ async function send() {
     const tm = document.createElement('div'); tm.className='msg-time';
     tm.textContent = new Date().toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit'});
     bubble.appendChild(tm);
-    if (d.provider) document.getElementById('modelLabel').textContent = d.provider;
+    if (d.provider) {
+      document.getElementById('modelLabel').textContent = d.provider;
+      const dot = document.getElementById('providerDot');
+      if (d.provider.includes('⚠️')) dot.style.background = '#f472b6';
+      else if (d.provider.includes('via')) dot.style.background = '#f59e0b';
+      else dot.style.background = '#34d399';
+    }
     document.getElementById('tokenCount').textContent = 'Tokens: '+(d.usage?.total_tokens||'?');
   } catch(e) {
     bubble.innerHTML = `<span style="color:#f472b6">❌ エラー: ${esc(e.message)}</span>`;
@@ -380,7 +386,7 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
   </div>`;
   fetch(CFG).then(r=>r.json()).then(d=>{
-    document.getElementById('modelLabel').textContent = d.provider_label || 'Template';
+    document.getElementById('modelLabel').textContent = d.provider_label || '🧩 RuleBased';
     currentProviderId = d.provider_id;
   }).catch(()=>{});
 });
