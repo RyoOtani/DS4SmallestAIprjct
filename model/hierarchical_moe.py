@@ -24,6 +24,7 @@ Design goals:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 import math
@@ -74,6 +75,9 @@ class HierarchicalMoEConfig:
 
     # Training
     dropout: float = 0.1
+
+    # Memory optimization
+    use_checkpointing: bool = True  # Activation checkpointing (trade compute for memory)
 
     # Domain labels
     domain_labels: List[str] = field(default_factory=lambda: [
@@ -235,11 +239,40 @@ class HierarchicalMoELayer(nn.Module):
         attn_out, _ = self.attn(x, x, x, attn_mask=attention_mask)
         x = residual + attn_out
 
-        # ── Hierarchical MoE FFN ──
+        # ── Hierarchical MoE FFN (checkpointable) ──
         residual = x
         x_normed = self.ffn_norm(x)
-        ffn_out = torch.zeros_like(x_normed)
+
+        if training and self.config.use_checkpointing:
+            # Activation checkpointing: recompute MoE block during backward.
+            # Saves ~O(n_experts × ffn_dim) activation memory per layer.
+            # use_reentrant=False is required for PyTorch >= 2.0 compat.
+            ffn_out, total_z_loss, total_load_balance, total_diversity_loss = \
+                torch_checkpoint(self._moe_ffn_block, x_normed, training,
+                                 use_reentrant=False)
+        else:
+            ffn_out, total_z_loss, total_load_balance, total_diversity_loss = \
+                self._moe_ffn_block(x_normed, training)
+
+        x = residual + ffn_out
+
         stats = {}
+        stats["z_loss"] = total_z_loss * self.config.router_z_loss_coef
+        stats["load_balance_loss"] = total_load_balance * self.config.load_balance_coef
+        stats["diversity_loss"] = total_diversity_loss * self.config.diversity_coef
+        stats["aux_loss"] = (stats["z_loss"] + stats["load_balance_loss"] + stats["diversity_loss"])
+        stats["layer"] = self.layer_idx
+        return x, stats
+
+    def _moe_ffn_block(self, x_normed: torch.Tensor, training: bool
+                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """MoE FFN block — checkpointable unit.
+
+        Extracted from forward() so torch.utils.checkpoint can wrap it.
+        Returns (ffn_out, z_loss, load_balance_loss, diversity_loss).
+        All auxiliary losses must be tensors with grad for router training.
+        """
+        ffn_out = torch.zeros_like(x_normed)
 
         # ── Level 1: Domain routing ──
         domain_weights, domain_indices, domain_logits, z_loss_domain = \
@@ -254,12 +287,9 @@ class HierarchicalMoELayer(nn.Module):
         ffn_out = ffn_out + shared_out
 
         # ── Level 2: Expert routing WITH domain weight application ──
-        # Iterate over top-k domain selections, applying domain_weights to outputs.
-        # This fixes the critical bug where domain weights were ignored,
-        # causing double-counted unweighted sums when top_k > 1.
         total_z_loss = z_loss_domain
-        total_load_balance = 0.0
-        total_diversity_loss = 0.0
+        total_load_balance = torch.tensor(0.0, device=x_normed.device)
+        total_diversity_loss = torch.tensor(0.0, device=x_normed.device)
 
         for dk in range(self.config.n_active_domains):
             dom_idx_k = domain_indices[:, :, dk]    # [B, S]
@@ -292,14 +322,7 @@ class HierarchicalMoELayer(nn.Module):
                 if dk == 0:
                     total_diversity_loss = total_diversity_loss + self._diversity_loss(g)
 
-        x = residual + ffn_out
-
-        stats["z_loss"] = total_z_loss * self.config.router_z_loss_coef
-        stats["load_balance_loss"] = total_load_balance * self.config.load_balance_coef
-        stats["diversity_loss"] = total_diversity_loss * self.config.diversity_coef
-        stats["aux_loss"] = (stats["z_loss"] + stats["load_balance_loss"] + stats["diversity_loss"])
-        stats["layer"] = self.layer_idx
-        return x, stats
+        return ffn_out, total_z_loss, total_load_balance, total_diversity_loss
 
     def _load_balance_loss(self, expert_logits: torch.Tensor,
                            expert_indices: torch.Tensor,
