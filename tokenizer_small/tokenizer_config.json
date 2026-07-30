@@ -1,0 +1,52 @@
+{
+  "add_prefix_space": false,
+  "model_type": "bpe",
+  "tokenizer_class": "PreTrainedTokenizerFast",
+  "unk_token": "<|unk|>",
+  "bos_token": "<|bos|>",
+  "eos_token": "<|eos|>",
+  "pad_token": "<|pad|>",
+  "special_tokens": [
+    "<|bos|>",
+    "<|eos|>",
+    "<|pad|>",
+    "<|unk|>",
+    "<|fim_prefix|>",
+    "<|fim_suffix|>",
+    "<|fim_middle|>",
+    "<|fim_pad|>",
+    "<|fim_hole|>",
+    "<|system|>",
+    "<|user|>",
+    "<|assistant|>",
+    "<|tool_call|>",
+    "<|tool_call_end|>",
+    "<|tool_resp|>",
+    "<|tool_resp_end|>",
+    "<|ja|>",
+    "<|en|>",
+    "<|code|>",
+    "<|python|>",
+    "<|javascript|>",
+    "<|typescript|>",
+    "<|rust|>",
+    "<|shell|>",
+    "<|sql|>",
+    "<|scratchpad|>",
+    "<|scratchpad_end|>"
+  ],
+  "vocab_size": 72000,
+  "languages": [
+    "en",
+    "ja",
+    "code"
+  ],
+  "code_languages": [
+    "python",
+    "javascript",
+    "typescript",
+    "rust",
+    "shell",
+    "sql"
+  ]
+}

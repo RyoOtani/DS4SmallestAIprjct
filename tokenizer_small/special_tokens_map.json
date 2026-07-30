@@ -1,0 +1,31 @@
+{
+  "bos_token": "<|bos|>",
+  "eos_token": "<|eos|>",
+  "unk_token": "<|unk|>",
+  "pad_token": "<|pad|>",
+  "additional_special_tokens": [
+    "<|fim_prefix|>",
+    "<|fim_suffix|>",
+    "<|fim_middle|>",
+    "<|fim_pad|>",
+    "<|fim_hole|>",
+    "<|system|>",
+    "<|user|>",
+    "<|assistant|>",
+    "<|tool_call|>",
+    "<|tool_call_end|>",
+    "<|tool_resp|>",
+    "<|tool_resp_end|>",
+    "<|ja|>",
+    "<|en|>",
+    "<|code|>",
+    "<|python|>",
+    "<|javascript|>",
+    "<|typescript|>",
+    "<|rust|>",
+    "<|shell|>",
+    "<|sql|>",
+    "<|scratchpad|>",
+    "<|scratchpad_end|>"
+  ]
+}
