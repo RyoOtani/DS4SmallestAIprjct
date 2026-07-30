@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 import math
 
+from model.layers.normalization import RMSNorm
+
 
 # ═══════════════════════════════════════════════════════
 # Config
@@ -187,11 +189,11 @@ class HierarchicalMoELayer(nn.Module):
         F = config.expert_ffn_dim
 
         # Attention (shared across experts)
-        self.attn_norm = nn.RMSNorm(D)
+        self.attn_norm = RMSNorm(D)
         self.attn = nn.MultiheadAttention(D, config.n_heads, dropout=config.dropout, batch_first=True)
 
         # FFN norms
-        self.ffn_norm = nn.RMSNorm(D)
+        self.ffn_norm = RMSNorm(D)
 
         # Level 1: Domain Router
         self.domain_router = DomainRouter(D, config.n_domain_groups,
@@ -243,86 +245,87 @@ class HierarchicalMoELayer(nn.Module):
         domain_weights, domain_indices, domain_logits, z_loss_domain = \
             self.domain_router(x_normed, training)
 
-        # ── Shared experts (always contribute) ──
+        # ── Shared experts (always contribute, no domain routing) ──
         shared_out = torch.zeros_like(x_normed)
-        for shared_exp in self.shared_experts:
-            shared_out += shared_exp(x_normed) / len(self.shared_experts) if self.shared_experts else 0
-        ffn_out += shared_out
+        if self.shared_experts:
+            for shared_exp in self.shared_experts:
+                shared_out = shared_out + shared_exp(x_normed)
+            shared_out = shared_out / len(self.shared_experts)
+        ffn_out = ffn_out + shared_out
 
-        # ── Level 2: Per-domain expert routing ──
+        # ── Level 2: Expert routing WITH domain weight application ──
+        # Iterate over top-k domain selections, applying domain_weights to outputs.
+        # This fixes the critical bug where domain weights were ignored,
+        # causing double-counted unweighted sums when top_k > 1.
         total_z_loss = z_loss_domain
+        total_load_balance = 0.0
         total_diversity_loss = 0.0
 
-        for g in range(self.config.n_domain_groups):
-            mask_g = (domain_indices == g).any(dim=-1)  # [B, S]
-            if not mask_g.any():
-                continue
+        for dk in range(self.config.n_active_domains):
+            dom_idx_k = domain_indices[:, :, dk]    # [B, S]
+            dom_w_k = domain_weights[:, :, dk]      # [B, S]
 
-            x_g = x_normed[mask_g]  # [N_g, D]
+            for g in range(self.config.n_domain_groups):
+                mask_gk = (dom_idx_k == g)           # [B, S]
+                if not mask_gk.any():
+                    continue
 
-            # Route to experts within group
-            exp_w, exp_idx, exp_log, z_loss_exp = self.expert_routers[g](x_g, training)
-            total_z_loss += z_loss_exp
+                # Tokens routed to domain g at position dk
+                x_g = x_normed[mask_gk]              # [N_g, D]
+                dom_w_g = dom_w_k[mask_gk].unsqueeze(-1)  # [N_g, 1]
 
-            # ── Expert computation ──
-            group_out = torch.zeros_like(x_g)
-            for k in range(self.config.n_active_experts):
-                e_idx = exp_idx[:, k]      # [N_g]
-                e_weight = exp_w[:, k:k+1] # [N_g, 1]
+                # Route to experts within domain
+                exp_w, exp_idx, exp_log, z_loss_exp = self.expert_routers[g](x_g, training)
+                total_z_loss = total_z_loss + z_loss_exp
 
-                for e in range(self.config.n_experts_per_group):
-                    token_mask = (e_idx == e)
-                    if not token_mask.any():
-                        continue
-                    # Expert dropout
-                    if training and self.config.expert_dropout > 0:
-                        if torch.rand(1).item() < self.config.expert_dropout:
-                            continue
-                    expert_out = self.experts[g][e](x_g[token_mask])
-                    group_out[token_mask] += e_weight[token_mask] * expert_out
-                    # Track usage
-                    self.expert_usage[g, e] += token_mask.sum().float()
+                # Compute expert outputs (weighted by expert weights)
+                expert_out = self._compute_expert_outputs(x_g, exp_w, exp_idx, g, training)
 
-            # Place back
-            ffn_out_flat = ffn_out.view(-1, D)
-            mask_flat = mask_g.view(-1)
-            ffn_out_flat[mask_flat] += group_out
-            ffn_out = ffn_out_flat.view(B, S, D)
+                # ── Apply domain weight and accumulate ──
+                ffn_out[mask_gk] = ffn_out[mask_gk] + dom_w_g * expert_out
 
-            # ── Load balance loss (importance-weighted) ──
-            total_z_loss += self._load_balance_loss(domain_logits[mask_g],
-                                                     exp_log, exp_idx,
-                                                     self.config.n_experts_per_group)
+                # Load balance loss (importance-weighted, per expert router)
+                total_load_balance = total_load_balance + self._load_balance_loss(
+                    exp_log, exp_idx, self.config.n_experts_per_group)
 
-            # ── Expert diversity loss ──
-            total_diversity_loss += self._diversity_loss(g)
+                # Expert diversity loss (once per domain group, avoid duplicate)
+                if dk == 0:
+                    total_diversity_loss = total_diversity_loss + self._diversity_loss(g)
 
         x = residual + ffn_out
 
         stats["z_loss"] = total_z_loss * self.config.router_z_loss_coef
+        stats["load_balance_loss"] = total_load_balance * self.config.load_balance_coef
         stats["diversity_loss"] = total_diversity_loss * self.config.diversity_coef
-        stats["aux_loss"] = (stats["z_loss"] + stats["diversity_loss"])
+        stats["aux_loss"] = (stats["z_loss"] + stats["load_balance_loss"] + stats["diversity_loss"])
         stats["layer"] = self.layer_idx
         return x, stats
 
-    def _load_balance_loss(self, domain_logits: torch.Tensor,
-                           expert_logits: torch.Tensor,
+    def _load_balance_loss(self, expert_logits: torch.Tensor,
                            expert_indices: torch.Tensor,
                            n_experts: int) -> torch.Tensor:
-        """Importance-weighted load balancing: penalize uneven expert usage."""
-        expert_probs = F.softmax(expert_logits, dim=-1)  # [N, n_experts]
-        mean_importance = expert_probs.mean(dim=0)       # [n_experts]
+        """Switch Transformer-style auxiliary load balancing loss.
 
-        # Fraction of tokens routed to each expert
+        L = n_experts * Σ_i (f_i · P_i)
+        where f_i = fraction of tokens dispatched to expert i,
+              P_i = mean softmax probability for expert i.
+
+        Perfect balance → Σ_i f_i·P_i = 1/n_experts → L = 1.
+        The loss pushes this value toward 1.
+        """
+        # Mean router probability per expert
+        expert_probs = F.softmax(expert_logits, dim=-1)  # [N, n_experts]
+        mean_importance = expert_probs.mean(dim=0)        # [n_experts]
+
+        # Fraction of tokens routed to each expert (count over all top-k slots)
         fraction = torch.zeros(n_experts, device=expert_logits.device)
         for e in range(n_experts):
             fraction[e] = (expert_indices == e).float().mean()
 
-        # Load balance: importance * fraction should be uniform
-        balance_loss = (mean_importance * fraction).sum() * n_experts
-        balance_loss = F.mse_loss(balance_loss,
-                                   torch.ones(1, device=balance_loss.device))
-        return balance_loss * self.config.load_balance_coef
+        # Switch Transformer auxiliary loss: n_experts · Σ_i(f_i · P_i)
+        # Minimizing this encourages uniform routing.
+        balance_loss = n_experts * (mean_importance * fraction).sum()
+        return balance_loss
 
     def _diversity_loss(self, group_idx: int) -> torch.Tensor:
         """Penalize experts within a group having too-similar weights."""
@@ -350,6 +353,45 @@ class HierarchicalMoELayer(nn.Module):
                 count += 1
 
         return loss / max(count, 1)
+
+    def _compute_expert_outputs(self, x: torch.Tensor,
+                                 exp_weights: torch.Tensor,
+                                 exp_indices: torch.Tensor,
+                                 group_idx: int,
+                                 training: bool) -> torch.Tensor:
+        """Compute weighted expert outputs for tokens in a domain group.
+
+        Args:
+            x: token hidden states [N, D]
+            exp_weights: top-k expert weights [N, n_active_experts]
+            exp_indices: top-k expert indices [N, n_active_experts]
+            group_idx: domain group index for expert lookup
+            training: whether in training mode
+
+        Returns:
+            Weighted sum of expert outputs [N, D]
+        """
+        N, D = x.shape
+        out = torch.zeros_like(x)
+
+        for k in range(self.config.n_active_experts):
+            e_idx = exp_indices[:, k]         # [N]
+            e_weight = exp_weights[:, k:k+1]  # [N, 1]
+
+            for e in range(self.config.n_experts_per_group):
+                mask = (e_idx == e)
+                if not mask.any():
+                    continue
+                # Expert dropout (stochastic depth for experts)
+                if training and self.config.expert_dropout > 0:
+                    if torch.rand(1, device=x.device).item() < self.config.expert_dropout:
+                        continue
+                expert_out = self.experts[group_idx][e](x[mask])
+                out[mask] = out[mask] + e_weight[mask] * expert_out
+                # Track usage
+                self.expert_usage[group_idx, e] += mask.sum().float()
+
+        return out
 
     @property
     def expert_param_counts(self) -> List[int]:
@@ -392,7 +434,7 @@ class HierarchicalMoEModel(nn.Module):
                 self.layers.append(self._make_dense_layer(config))
 
         # Output
-        self.final_norm = nn.RMSNorm(config.hidden_dim, dtype=dtype)
+        self.final_norm = RMSNorm(config.hidden_dim, dtype=dtype)
         self.lm_head = nn.Linear(config.hidden_dim, config.vocab_size, bias=False, dtype=dtype)
         self.lm_head.weight = self.tok_embeddings.weight  # tie
 
@@ -405,10 +447,10 @@ class HierarchicalMoEModel(nn.Module):
     def _make_dense_layer(self, config: HierarchicalMoEConfig) -> nn.Module:
         D, F = config.hidden_dim, config.expert_ffn_dim
         return nn.ModuleDict({
-            "attn_norm": nn.RMSNorm(D, dtype=self.dtype),
+            "attn_norm": RMSNorm(D, dtype=self.dtype),
             "attn": nn.MultiheadAttention(D, config.n_heads, dropout=config.dropout,
                                           batch_first=True, dtype=self.dtype),
-            "ffn_norm": nn.RMSNorm(D, dtype=self.dtype),
+            "ffn_norm": RMSNorm(D, dtype=self.dtype),
             "ffn": nn.Sequential(
                 nn.Linear(D, F, bias=False, dtype=self.dtype), nn.SiLU(),
                 nn.Linear(F, F, bias=False, dtype=self.dtype), nn.SiLU(),
@@ -506,7 +548,7 @@ def create_hierarchical_moe_model(vocab_size: int = 72000,
         hidden_dim=2048, n_layers=26, n_heads=16, head_dim=128,
         vocab_size=vocab_size, max_seq_len=4096,
         n_moe_layers=16, n_domain_groups=4, n_experts_per_group=6,
-        n_shared_experts=2, n_active_domains=2, n_active_experts=1,
+        n_shared_experts=2, n_active_domains=2, n_active_experts=2,
         expert_ffn_dim=5376,  # calibrated for 3.0B active / 14.6B total
     )
     return HierarchicalMoEModel(config, dtype=dtype)
