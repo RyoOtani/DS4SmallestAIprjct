@@ -57,6 +57,13 @@
         "min_loss_scale": 1
     },
 
+    "_bf16_note": "Use bf16 on A100/H100 for better numerical stability. Replace fp16 block above with:",
+    "_bf16_config": {
+        "bf16": {
+            "enabled": true
+        }
+    },
+
     "gradient_clipping": 1.0,
 
     "activation_checkpointing": {
@@ -67,7 +74,14 @@
         "profile": false
     },
 
-    "wall_clock_breakdown": false,
+    "wall_clock_breakdown": true,
+
+    "_spot_instance_notes": {
+        "checkpoint_frequency": "every 30 min or 500 steps",
+        "preemption_signal": "SIGTERM (handled by training/checkpoint.py)",
+        "auto_upload": "use CheckpointManager with s3_upload_hook or gcs_upload_hook",
+        "estimated_restart_overhead": "2-5 min (load checkpoint + recompile)"
+    },
 
     "flops_profiler": {
         "enabled": false,

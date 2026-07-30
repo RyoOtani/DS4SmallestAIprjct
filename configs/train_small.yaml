@@ -1,0 +1,67 @@
+# ============================================================
+# Hierarchical MoE — Training Config (small smoke test)
+# ============================================================
+# Usage:
+#   deepspeed --num_gpus=1 training/trainer.py \
+#     --deepspeed configs/deepspeed_zero3.json \
+#     --train-config configs/train_small.yaml
+# ============================================================
+
+model:
+  # Tiny config for smoke testing — ~3M params, fits 4GB GPU
+  hidden_dim: 64
+  n_layers: 2
+  n_heads: 2
+  head_dim: 32
+  vocab_size: 1000
+  n_moe_layers: 1
+  n_domain_groups: 2
+  n_experts_per_group: 2
+  n_shared_experts: 1
+  n_active_domains: 2
+  n_active_experts: 2
+  expert_ffn_dim: 128
+  max_seq_len: 512
+  use_checkpointing: true
+
+training:
+  # Total steps
+  max_steps: 1000
+  # Batch
+  micro_batch_size: 1
+  gradient_accumulation_steps: 4
+  seq_len: 512
+  # Optimizer
+  learning_rate: 2.0e-4
+  weight_decay: 0.1
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+  max_grad_norm: 1.0
+  # Mixed precision
+  dtype: fp16  # fp16 / bf16 / fp32
+  # LR schedule
+  warmup_steps: 100
+
+  # ── Load balance warmup (critical for MoE stability) ──
+  load_balance_warmup_steps: 1000
+  # load_balance_coef linearly increases from 0 → target over warmup_steps
+  load_balance_coef_target: 0.01
+
+  # Router Z-loss warmup
+  router_z_warmup_steps: 500
+  router_z_loss_coef_target: 0.001
+
+  # ── Checkpointing ──
+  save_every_steps: 500
+  save_total_limit: 3
+  checkpoint_dir: ./checkpoints
+
+  # ── Logging ──
+  log_every_steps: 10
+  use_wandb: false
+
+data:
+  # Dummy data for smoke test
+  use_dummy: true
+  dummy_vocab_size: 1000
+  dummy_seq_len: 512
