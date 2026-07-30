@@ -1,127 +1,104 @@
-# TinyLLM — ds4 Personal AI 〜 自律 AI ソフトウェアエンジニア基盤
+# TinyLLM — DS4 Personal AI 〜 自律 AI ソフトウェアエンジニア基盤
 
-> **「インターネット不要、月額課金なし。個人の PC で GPT‑5 に匹敵する開発生産性を発揮し、かつ自ら成長し続ける AI パートナー」**
+> **「インターネット不要、月額課金なし。個人の PC で AI 開発生産性を発揮し、かつ自ら成長し続ける AI パートナー」**
 
-**TinyLLM** は antirez のミニマリズム (ds4) と DeepSeek の効率性 (MoE/MLA/MTP) を融合した、
-C 言語約 4,200 行の単一バイナリ推論エンジン + Python エージェント + 最先端モデルアーキテクチャの
+**TinyLLM** は C 言語の単一バイナリ推論エンジン + Python エージェント + Hierarchical MoE モデル + Web チャット UI の
 **完全自律 AI ソフトウェアエンジニア基盤**です。
 
 ```bash
-$ tinyllm run model.gguf                 # CLI 対話モード
-$ tinyllm serve model.gguf 8420          # HTTP API サーバー
-$ tinyllm agent model.gguf "バグを修正して" # 自律エージェント
-$ torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge  # 分散学習
+$ tinyllm run model.gguf                    # CLI 対話モード
+$ tinyllm serve model.gguf 8420             # HTTP API サーバー
+$ tinyllm agent model.gguf "バグを修正して"    # 自律エージェント
+$ python agent/chat_server.py --port 8421   # Web チャット UI (ブラウザ)
+$ python agent/chat_server.py --provider fallback --api-key sk-xxx  # 自動フォールバック
+$ torchrun --nproc_per_node=8 train ...     # 分散学習
 ```
 
 ## 📊 プロジェクト規模
 
 | 指標 | 値 |
 |------|-----|
-| 全ファイル数 | **~100 ファイル** |
-| 総コード行数 | **~17,000 行** |
-| C ランタイム | 4,208 行 (86 KB バイナリ) |
-| Python エージェント | ~7,000 行 |
-| AI モデル定義 | ~3,000 行 |
-| モデルスケール | nano 1.5B 〜 giga 6.7T (9段階) |
-| 完了フェーズ | Phase 1〜9 / 9 |
-| テスト | 114 tests (Phase 6: 6, Phase 7: 6, Phase 8: 50, Phase 9: 45, Model: 7) |
+| 全ファイル数 | **~130 ファイル** |
+| 総コード行数 | **~24,000 行** |
+| C ランタイム | 4,200 行 (88 KB バイナリ) |
+| Python エージェント | ~10,000 行 |
+| Web チャット UI | シングルページ HTML/CSS/JS |
+| AI モデル定義 | ~3,500 行 (Hierarchical MoE) |
+| 本格ツール群 | 6 ツール (Git/Sandbox/Diff/Repair/Benchmark) |
+| プロバイダー | 11 種類 (自前/DeepSeek/OpenAI/Claude/Gemini/...) |
+| モデルスケール | small 530M 〜 Hierarchical MoE 14.5B |
+| トークナイザー | nano 32K / small 72K (英日+Coding特化) |
 
 ## 特徴
 
 | 項目 | 値 |
 |------|-----|
-| バイナリサイズ | 86 KB (C コードのみ) |
-| モデル範囲 | 活性化 0.5B〜314B (総 1.5B〜6.7T) |
+| バイナリサイズ | 88 KB (C コードのみ) |
 | 外部依存 | ゼロ (C ランタイム), pip install のみ (Python) |
 | 量子化 | GGUF Q4_0 / Q6_K / Q8_0 混合 |
-| 分散学習 | FSDP / DeepSpeed ZeRO-3 / TP/PP/DP/EP |
-| 混合精度 | BF16 / FP16 / FP8 |
 | 推論バックエンド | C (NEON/AVX2/Accelerate SIMD) |
-| 設定 | 不要 (auto-detect) |
+| プロバイダー | 自前 TinyLLM + OpenAI/DeepSeek/Claude/Gemini/Groq/Ollama 他 |
+| フォールバック | 🦾自前→🐋DeepSeek→🤖OpenAI→⚡Groq→🧩RuleBased (5段自動) |
+| チャットUI | ブラウザベース、IME対応、コードコピー、モデル切替 |
+| Web検索 | DuckDuckGo (ddgs), 24h キャッシュ |
+| 設定 | 不要 (auto-detect) / APIキーはメモリのみ保持 |
 
 ## アーキテクチャ
 
 ```
 ┌──────────────────────────┐     ┌───────────────────────────┐
-│  tinyllm (C 単一バイナリ)  │     │  外部ツール群              │
-│  ├─ GGUF ローダー (MoE)    │     │  ├─ tree-sitter (AST)     │
-│  ├─ MLA アテンション       │────▶│  ├─ gcc/pytest (テスト)    │
-│  ├─ MoE ルーター          │ パイプ│  ├─ ベクトル検索 (RAG)     │
-│  ├─ BPE トークナイザー     │◀────│  ├─ Docker (サンドボックス) │
-│  ├─ 投機的デコード         │     │  └─ mypy/pyright (型検査)  │
-│  ├─ HTTP/CLI/デーモン      │     └───────────────────────────┘
-│  ├─ RAG + 長期記憶        │
-│  └─ 自己修正エージェント    │
-└──────────────────────────┘
-┌──────────────────────────┐
-│  Cloud GPU Launcher       │
-│  ├─ RunPod / VastAI       │
-│  ├─ GPUSOROBAN / Lambda   │
-│  └─ AWS / Azure / GCP     │
-└──────────────────────────┘
+│  tinyllm (C 単一バイナリ)  │     │  Web チャット UI           │
+│  ├─ GGUF ローダー          │     │  ├─ ブラウザベース UI      │
+│  ├─ MLA アテンション       │     │  ├─ IME 対応 (日本語)      │
+│  ├─ BPE トークナイザー     │     │  ├─ コードコピー機能       │
+│  ├─ HTTP/CLI/デーモン      │     │  ├─ モデル切替 ⚙️          │
+│  ├─ RAG + 長期記憶        │     │  └─ フォールバック状態表示   │
+│  └─ 自己修正エージェント    │     └───────────────────────────┘
+└──────────────────────────┘                 │
+          │                                  │
+┌─────────▼────────────────┐     ┌───────────▼───────────────┐
+│  プロバイダー層            │     │  本格ツール群              │
+│  ├─ TinyLLMProvider (自前) │     │  ├─ Git Checkpoint/Rollback│
+│  ├─ OpenAICompatProvider   │     │  ├─ 安全サンドボックス     │
+│  ├─ AnthropicProvider      │     │  ├─ 本格差分エディタ       │
+│  ├─ GoogleProvider         │     │  ├─ 自律Self-Repair Loop  │
+│  ├─ RuleBasedProvider      │     │  ├─ ベンチマーク基盤       │
+│  └─ FallbackProvider (連鎖) │     │  └─ DuckDuckGo Web検索    │
+└────────────────────────────┘     └───────────────────────────┘
+┌────────────────────────────┐
+│  Hierarchical MoE モデル    │
+│  ├─ 2段階ルーティング       │
+│  │   Domain Router (L1)    │
+│  │   └→ Expert Router (L2) │
+│  ├─ 4 ドメイン × 6 専門家   │
+│  ├─ 共有エキスパート        │
+│  ├─ 負荷分散 + 多様化       │
+│  └─ GGUF エクスポート       │
+└────────────────────────────┘
 ┌──────────────────────────┐
 │  Python エージェント群     │
 │  ├─ Phase 3: マルチ協調   │
 │  ├─ Phase 4: SW エンジニア│
 │  ├─ Phase 5: 自律コーディング│
 │  ├─ Phase 6: 深いコード理解│
-│  │   ├─ 多言語AST/CallGraph│
-│  │   ├─ アーキテクチャ分析 │
-│  │   ├─ Quality Pipeline  │
-│  │   ├─ Critic + Debugger │
-│  │   └─ 構造化Tool Calling │
 │  ├─ Phase 7: 分散AI基盤   │
-│  │   ├─ 3D並列 (DP/TP/PP) │
-│  │   ├─ FSDP/DeepSpeed    │
-│  │   ├─ BF16/FP16/FP8     │
-│  │   └─ NCCL通信+分散CKPT  │
-│  └─ Phase 8: 自己改善AI   │
-│      ├─ 自己評価+改善サイクル│
-│      ├─ 経験再生+失敗DB    │
-│      ├─ LoRAオンライン学習  │
-│      ├─ メタ学習(戦略最適化)│
-│      └─ 統合Orchestrator   │
+│  ├─ Phase 8: 自己改善AI   │
 │  └─ Phase 9: AI研究員     │
-│      ├─ arXiv論文読解+解析 │
-│      ├─ 実験設計+自動実行   │
-│      ├─ 新アルゴリズム提案  │
-│      ├─ 統計的仮説検証     │
-│      └─ 研究レポート生成   │
 └──────────────────────────┘
-┌──────────────────────────┐
-│  AI モデル (PyTorch)      │
-│  ├─ 9スケール (1.5B〜6.7T)│
-│  ├─ MLA + MoE + MTP       │
-│  ├─ SwiGLU + RoPE(YaRN)   │
-│  ├─ 訓練パイプライン       │
-│  └─ GGUF Q4_0/Q6_K エクスポート│
-└──────────────────────────┘
-```
 
 ## 主要技術
 
+- **Hierarchical MoE** (階層型 Mixture of Experts): Domain Router (L1) → Expert Router (L2), 416 experts, 3.0B active / 14.5B total
 - **MLA** (Multi-head Latent Attention): KV キャッシュを 1/8 に圧縮
-- **MoE** (Mixture of Experts): 256+ エキスパート、top-8 のみ活性化
-- **MTP** (Multi-Token Prediction): 最大 8 トークン同時予測
-- **SwiGLU** FFN: ゲーテッド活性化、FP8 対応
-- **RoPE + YaRN**: 32K コンテキスト対応の位置エンコーディング
-- **投機的デコード**: N-gram draft + 一括検証
-- **3D 並列**: データ/テンソル/パイプライン + エキスパート並列
-- **アトミックパッチ**: バイナリ検出、事前検証、ロールバック
-- **停止検出**: 同一エラー/診断のハッシュ+テキスト比較
-- **mypy/pyright 連携**: 外部型チェッカーによる深い型推論
-- **自律改善ループ**: 自己評価→診断→修正→測定の収束サイクル
-- **経験再生**: 成功/失敗の経験を保存・検索し、類似タスクで再利用
-- **障害データベース**: エラーパターンをハッシュ化して検索、過去の修正方法を提案
-- **LoRA オンライン学習**: ベースモデル凍結・劣化時自動ロールバック・安全性ガードレール
-- **メタ学習**: タスク横断パターン認識・戦略最適化・few-shot プロンプト生成
-- **arXiv 論文読解**: 論文検索・構造化解析・知識グラフ構築・文献比較
-- **実験自動設計**: A/Bテスト・グリッドサーチ・アブレーション研究の自動生成
-- **アルゴリズム提案**: 既知技術の組み合わせによる新規アルゴリズム創出・新規性/実現性/インパクト評価
-- **統計的仮説検証**: Welchのt検定・効果量(Cohen's d)・多重比較補正(Bonferroni/Holm)
-- **研究レポート生成**: Markdown + LaTeX 形式の自動論文執筆
-- **クラウドGPU抽象化**: RunPod/VastAI/GPUSOROBAN/Lambda/AWS/Azure/GCP/Local(Metal/CUDA) の統一インターフェース
-- **Metal GPU バックエンド**: Apple M1/M2/M3/M4 GPU上のmatmul/flash-attention/MoE/RoPE/RMS Norm
+- **SwiGLU** FFN: ゲーテッド活性化
+- **RoPE**: 位置エンコーディング
+- **プロバイダー抽象化**: BaseProvider (ABC) → 6種の実装 + 自動フォールバックチェーン
+- **本格差分編集**: unified diff 生成・検証・ファジー適用 (git apply + patch)
+- **安全サンドボックス**: CPU/メモリ/時間制限 + ネットワーク隔離
+- **Git Checkpoint/Rollback**: コード変更の安全な実験・復元
+- **自律Self-Repair Loop**: CHECKPOINT→DIAGNOSE→PLAN→EDIT→TEST→VERIFY
+- **ベンチマーク基盤**: 5タスクのコード生成評価 + 回帰比較
+- **英日+Coding特化トークナイザー**: BPE 72,000 語彙 (Python/Rust/TS/SQL/Shell)
 
 ## ビルド
 
@@ -138,55 +115,27 @@ pip install -r requirements.txt
 ## クイックスタート
 
 ```bash
-# モデル作成
-python3 -c "from model import create_model; m = create_model('small'); print('OK')"
+# Web チャット UI 起動 (ブラウザで localhost:8421)
+python agent/chat_server.py --port 8421
 
-# コードレビュー
-python3 -m agent.phase6.cli review src/main.c
+# 自動フォールバックで起動 (自前→DeepSeek→OpenAI→Groq→RuleBased)
+python agent/chat_server.py --provider fallback --api-key sk-xxx
 
-# リポジトリ分析
-python3 -m agent.phase6.cli scan .
+# モデル作成 (Hierarchical MoE)
+python -c "from model.hierarchical_moe import create_hierarchical_moe_model; m = create_hierarchical_moe_model(dtype=torch.float16)"
 
-# アーキテクチャ診断
-python3 -m agent.phase6.cli analyze .
+# トークナイザー作成 (英日+Coding特化 72K)
+python create_tokenizer_small.py --vocab 72000
 
-# 品質パイプライン
-python3 -m agent.phase6.cli quality . --fix
+# 本格ツール群
+python -m agent.tools.git_checkpoint checkpoint "before-refactor"
+python -m agent.tools.sandbox python "print(1+1)"
+python -m agent.tools.benchmark run
+python -m agent.tools.self_repair "TypeError at line 42"
 
-# 分散学習 (8 GPU)
-torchrun --nproc_per_node=8 -m agent.phase7.cli train --config xlarge
-
-# テスト実行
-python3 tests/test_phase6.py
-python3 tests/test_phase7.py
-python3 tests/test_phase8.py
-python3 tests/test_phase9.py
-python3 tests/test_model.py
-
-# 自己改善AI
-python3 -m agent.phase8.cli evaluate --test-command "python3 tests/"
-python3 -m agent.phase8.cli replay --task-type code_generation
-python3 -m agent.phase8.cli failures
-python3 -m agent.phase8.cli skills
-python3 -m agent.phase8.cli adapters
-python3 -m agent.phase8.cli status
-
-# AI研究員
-python3 -m agent.phase9.cli search --query "mixture of experts transformer"
-python3 -m agent.phase9.cli read --arxiv-id 1706.03762
-python3 -m agent.phase9.cli propose --problem "efficient LLM inference" --techniques "MoE,MLA,distillation"
-python3 -m agent.phase9.cli hypothesis test --control "0.85,0.86,0.84" --treatment "0.88,0.89,0.87"
-python3 -m agent.phase9.cli research --topic "efficient transformer attention"
-python3 -m agent.phase9.cli status
-
-# クラウドGPU起動 (プロバイダー非依存)
-python3 -m agent.cloud.launcher compare --config medium --gpus 8 --gpu-type a100-80gb
-python3 -m agent.cloud.launcher launch --provider runpod --config xlarge
-python3 -m agent.cloud.launcher prices --provider vastai
-python3 -m agent.cloud.launcher status --provider aws
-
-# ローカルGPU (Metal/CUDA)
-python3 -m agent.cloud.launcher launch --provider local   # Auto-detect GPU
+# C ランタイム
+make && ./tinyllm run model.gguf
+./tinyllm serve model.gguf 8420
 ```
 
 ## フェーズ別ロードマップ
@@ -257,12 +206,12 @@ huggingface-cli upload Ryo3desu/tinyllm-models your-model.gguf tinyllm-small/you
 
 ### 🎯 Priority Models
 
-| Priority | Model | Active Params | GPU Required | Why |
-|----------|-------|--------------|-------------|-----|
-| 🔴 Highest | `small` | **3.0B** | A100×4, 1 week | Runs on any PC |
-| 🟠 High | `medium` | 14.5B | A100×8, 2 weeks | Pro local dev |
-| 🟡 Medium | `xlarge` | 43.9B | H100×16, 3 weeks | Professional |
-| 🟢 Low | `mega` / `giga` | 178B+ | H100×64, 4 weeks | Research |
+| Priority | Model | Active Params | Total Params | Architecture | GPU Required |
+|----------|-------|--------------|-------------|-------------|-------------|
+| 🔴 Highest | `hierarchical-moe` | **3.0B** | 14.5B | Hierarchical MoE (416 experts) | A100×4, 1 week |
+| 🟠 High | `small` | 530M | 530M | Hierarchical MoE (192 experts, 576D) | A100×1, 3 days |
+| 🟡 Medium | `medium` | 1.5B | 1.5B | Dense Transformer | A100×4, 1 week |
+| 🟢 Low | `large` | 7B | 7B | Dense Transformer | A100×8, 2 weeks |
 
 ### 📦 Share Methods
 
@@ -317,20 +266,18 @@ All `subprocess.run()` calls in provider code use `shell=False` with `shlex.spli
 
 ### Tokenizer
 
-TinyLLM uses a **ByteLevel BPE tokenizer with 32,000 vocabulary** (v7.1), bundled in-repo:
+TinyLLM は 2 種類のトークナイザーを提供します：
 
-| Property | Value |
-|----------|-------|
-| Type | ByteLevel BPE (GPT-2 architecture) + NFKC normalization |
-| Vocab size | **32,000** (21 specials + 256 bytes + 31,723 BPE merges) |
-| Special tokens | `<s>`=0, `</s>`=1, `<pad>`=2, `<unk>`=3, FIM (4-8), Tool (12-15), Chat (18-20) |
-| Python (bundled) | `AutoTokenizer.from_pretrained('tokenizer')` — 3.3 MB, zero download |
-| C runtime | `tl_tokenizer_load("tokenizer.tokbin")` — 950 KB binary |
-| Rebuild | `python create_tokenizer.py` (any vocab size) |
-| Verify | `python test_3way_tokenizer.py` — Python↔C↔TOKBIN consistency |
-
-> **Note**: The default vocab size is 32,000 (not 65,536). For larger vocabularies,
-> use `python create_tokenizer.py --vocab 65536`. See `TOKENIZER_SPEC.md` for full specification.
+| Property | nano (既存) | small (新) |
+|----------|------------|------------|
+| Type | ByteLevel BPE | ByteLevel BPE |
+| Vocab size | **32,000** | **72,000** |
+| 対象言語 | 汎用 | **英語 + 日本語 + コード特化** |
+| 特殊トークン | 21 | **27** (FIM/Chat/Tool/言語マーカー) |
+| 対応コード | — | Python/Rust/TypeScript/SQL/Shell |
+| 作成 | `python create_tokenizer.py` | `python create_tokenizer_small.py` |
+| Python | `AutoTokenizer.from_pretrained('tokenizer')` | `AutoTokenizer.from_pretrained('tokenizer_small')` |
+| C runtime | `tokenizer.tokbin` (950 KB) | `tokenizer_small.tokbin` |
 
 ### Recommended Training Data
 
@@ -376,29 +323,27 @@ tokens.astype('int32').tofile('data/train.bin')
 
 ---
 
-## 🧪 Training your own model
+## 🧪 Training
 
 ```bash
-# 1. Quick start (1-click)
-#    → Open TINYLLM_TRAIN_BENCHMARK.ipynb in Colab
-
-# 2. Single GPU
-python3 -m agent.phase7.cli train \
-  --config nano --data data/train.bin --batch-size 2 --max-steps 100000
-
-# 3. Multi GPU
-torchrun --nproc_per_node=8 -m agent.phase7.cli train \
-  --config small --data data/train.bin --batch-size 2 --grad-accum 4 \
-  --lr 2e-4 --max-steps 200000 --output-dir checkpoints
-
-# 4. Export to GGUF
-python3 -c "
-from model.export.gguf_exporter import export_model_to_gguf
-export_model_to_gguf(model, 'tinyllm-small-q4.gguf', config_dict, use_q4_0=True)
+# ── Hierarchical MoE モデル生成 ──
+python -c "
+from model.hierarchical_moe import create_hierarchical_moe_model
+import torch
+model = create_hierarchical_moe_model(dtype=torch.float16)  # ~30GB
+print('Ready for training')
 "
 
-# 5. Run with C runtime
-./tinyllm run tinyllm-small-q4.gguf
+# ── トークナイザー作成 (英日+Coding 72K) ──
+python create_tokenizer_small.py --vocab 72000
+
+# ── 分散学習 (FSDP) ──
+torchrun --nproc_per_node=8 -m training.trainer \
+  --model hierarchical_moe --data data/train.bin \
+  --batch-size 2 --grad-accum 4 --lr 2e-4 --max-steps 200000
+
+# ── GGUF エクスポート ──
+python export_tokenizer.py  # .tokbin for C runtime
 ```
 
 > **「コードは書いた。あとは世界の GPU パワーでモデルを生み出すだけ。」**
